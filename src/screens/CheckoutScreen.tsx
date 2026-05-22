@@ -16,28 +16,58 @@ import { MapPin, ChevronLeft, CheckCircle2, User, Phone } from 'lucide-react-nat
 import { cartService } from '../services/CartService';
 import { authService } from '../services/AuthService';
 
-const CheckoutScreen = ({ navigation }: any) => {
+const getProductUnit = (category?: string) => {
+  const cat = (category || '').toLowerCase();
+  if (cat.includes('cement')) return 'Bags';
+  if (cat.includes('tmt')) return 'MM';
+  if (cat.includes('slab') || cat.includes('slap') || cat.includes('kadapa')) return 'Slabs';
+  return 'units';
+};
+
+const CheckoutScreen = ({ navigation, route }: any) => {
   const user = authService.getCurrentUser();
-  const [customerName, setCustomerName] = useState(user?.full_name || user?.name || '');
-  const [customerPhone, setCustomerPhone] = useState(user?.mobile_number || user?.phone || '');
+  const [customerName, setCustomerName] = useState(route?.params?.customerName || user?.full_name || user?.name || '');
+  const [customerPhone, setCustomerPhone] = useState(route?.params?.customerPhone || user?.mobile_number || user?.phone || '');
   const [customerAddress, setCustomerAddress] = useState(user?.business_address || user?.address || '');
-  const [paymentType, setPaymentType] = useState('cash');
+  const [paymentType] = useState('cash');
   const [placedOrder, setPlacedOrder] = useState<any>(null);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const [cartItems, setCartItems] = useState(cartService.getCartItems());
+  const [cartItems, setCartItems] = useState(() => {
+    const allItems = cartService.getCartItems();
+    const pName = route?.params?.customerName;
+    const pPhone = route?.params?.customerPhone;
+    
+    if (pName !== undefined) {
+      return allItems.filter((i: any) => 
+        i.partyName === pName && 
+        (!pPhone || i.partyPhone === pPhone)
+      );
+    }
+    return allItems;
+  });
 
   useEffect(() => {
-    const update = () => setCartItems(cartService.getCartItems());
+    const update = () => {
+      const allItems = cartService.getCartItems();
+      const pName = route?.params?.customerName;
+      const pPhone = route?.params?.customerPhone;
+      if (pName) {
+        setCartItems(allItems.filter((i: any) => 
+          i.partyName === pName && (!pPhone || i.partyPhone === pPhone)
+        ));
+      } else {
+        setCartItems(allItems);
+      }
+    };
     cartService.on('change', update);
     return () => cartService.off('change', update);
-  }, []);
+  }, [route?.params?.customerName, route?.params?.customerPhone]);
 
-  const subtotal = cartItems.reduce((acc, item) => acc + ((item.price || 0) * (item.qty || 0)), 0);
+  const totalQty = cartItems.reduce((acc, item) => acc + (item.qty || 0), 0);
 
   const handlePlaceOrder = async () => {
     try {
-      const user = authService.getCurrentUser();
       console.log('Logged User:', user);
       const result = await cartService.apiPlaceOrder({
         name: customerName,
@@ -58,12 +88,7 @@ const CheckoutScreen = ({ navigation }: any) => {
     }
   };
 
-  const SummaryRow = ({ label, value, bold = false }: any) => (
-    <View style={styles.summaryRow}>
-      <Text style={[styles.summaryLabel, bold && { fontWeight: 'bold', color: Colors.white }]}>{label}</Text>
-      <Text style={[styles.summaryValue, bold && { color: Colors.accent, fontSize: 18 }]}>{value}</Text>
-    </View>
-  );
+
 
   if (isSuccess) {
     return (
@@ -73,7 +98,7 @@ const CheckoutScreen = ({ navigation }: any) => {
         <Text style={[Typography.bodyMedium, styles.successSubtitle]}>
           ✅ Request sent! Admin will fix prices soon.
         </Text>
-        <Text style={[Typography.bodyMedium, { color: Colors.accent, marginTop: 10, fontWeight: 'bold' }]}>
+        <Text style={[Typography.bodyMedium, styles.successQuotationId]}>
           Quotation ID: {placedOrder?.id}
         </Text>
         <View style={styles.billRow}>
@@ -100,7 +125,7 @@ const CheckoutScreen = ({ navigation }: any) => {
           <ChevronLeft size={24} color={Colors.white} />
         </TouchableOpacity>
         <Text style={[Typography.h2, styles.headerTitle]}>Checkout</Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.headerRightSpacer} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -156,16 +181,18 @@ const CheckoutScreen = ({ navigation }: any) => {
               <View key={index} style={styles.itemRow}>
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.itemQty}>Qty: {item.qty}</Text>
+                  <Text style={styles.itemBrand}>{item.brand || 'Manoj Steels Material'}</Text>
                 </View>
-                <Text style={styles.itemPrice}>₹{(item.price * item.qty).toLocaleString()}</Text>
+                <View style={styles.qtyBadge}>
+                  <Text style={styles.qtyBadgeText}>{item.qty} {getProductUnit(item.category)}</Text>
+                </View>
               </View>
             ))}
             
             <View style={styles.divider} />
             
-            <SummaryRow label="Items Total" value={`₹${subtotal.toLocaleString()}`} />
-            <SummaryRow label="Total" value={`₹${subtotal.toLocaleString()}`} bold />
+            <SummaryRow label="Total Products Listed" value={`${cartItems.length} Products`} />
+            <SummaryRow label="Total Quantity Requested" value={`${totalQty} units`} bold />
           </View>
       </ScrollView>
 
@@ -322,7 +349,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   itemInfo: {
     flex: 1,
@@ -330,16 +368,26 @@ const styles = StyleSheet.create({
   },
   itemName: {
     color: Colors.text,
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: 'bold',
   },
-  itemQty: {
+  itemBrand: {
     color: Colors.textSecondary,
     fontSize: 12,
+    fontWeight: '600',
     marginTop: 2,
   },
-  itemPrice: {
-    color: Colors.text,
+  qtyBadge: {
+    backgroundColor: 'rgba(24, 119, 242, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyBadgeText: {
+    color: Colors.primary,
+    fontSize: 13,
     fontWeight: 'bold',
   },
   divider: {
@@ -349,10 +397,13 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     color: Colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '500',
   },
   summaryValue: {
     color: Colors.text,
     fontWeight: 'bold',
+    fontSize: 14,
   },
   footer: {
     padding: 20,
@@ -430,6 +481,31 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: 'bold',
   },
+  successQuotationId: {
+    color: Colors.accent,
+    marginTop: 10,
+    fontWeight: 'bold',
+  },
+  headerRightSpacer: {
+    width: 40,
+  },
+  summaryLabelBold: {
+    fontWeight: 'bold',
+    color: Colors.text,
+    fontSize: 15,
+  },
+  summaryValueBold: {
+    color: Colors.primary,
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 });
+
+const SummaryRow = ({ label, value, bold = false }: any) => (
+  <View style={styles.summaryRow}>
+    <Text style={[styles.summaryLabel, bold && styles.summaryLabelBold]}>{label}</Text>
+    <Text style={[styles.summaryValue, bold && styles.summaryValueBold]}>{value}</Text>
+  </View>
+);
 
 export default CheckoutScreen;

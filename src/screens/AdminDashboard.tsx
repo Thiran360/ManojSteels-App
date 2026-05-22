@@ -13,14 +13,13 @@ import {
   Image,
   RefreshControl,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
 import { 
   ShoppingBag, 
-  Users, 
   TrendingUp, 
-  Clock, 
   CheckCircle2, 
   ChevronLeft,
   LogOut,
@@ -33,8 +32,10 @@ import {
   X,
   Trash2,
   Eye,
-  EyeOff
+  EyeOff,
+  Coins
 } from 'lucide-react-native';
+import { Calendar } from 'react-native-calendars';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { generatePDF } from 'react-native-html-to-pdf';
 import Share from 'react-native-share';
@@ -51,12 +52,24 @@ const AdminDashboard = ({ navigation }: any) => {
   const [activeCart, setActiveCart] = useState(cartService.getCartItems());
   const [orderList, setOrderList] = useState(cartService.getOrders());
   const receiptRef = React.useRef<any>(null);
+  const liveReceiptRef = React.useRef<any>(null);
   const [bulkOrderList, setBulkOrderList] = useState(cartService.getBulkOrders());
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showTruckModal, setShowTruckModal] = useState(false);
   const [editingTruckOrder, setEditingTruckOrder] = useState<any>(null);
   const [tempTruckNo, setTempTruckNo] = useState('');
+
+  // Customize Bulk Order Modal State
+  const [showCustomizeBulkModal, setShowCustomizeBulkModal] = useState(false);
+  const [customizingOrder, setCustomizingOrder] = useState<any>(null);
+  const [customBags, setCustomBags] = useState('');
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [customLocation, setCustomLocation] = useState('');
+  const [customTruckNo, setCustomTruckNo] = useState('');
+  const [customDeliveryDate, setCustomDeliveryDate] = useState('');
+  const [customPaymentType, setCustomPaymentType] = useState('');
+  const [customStatus, setCustomStatus] = useState('');
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [isEditingPrice, setIsEditingPrice] = useState(false);
@@ -72,16 +85,44 @@ const AdminDashboard = ({ navigation }: any) => {
   });
   const [brandList, setBrandList] = useState(cartService.getBrands());
   const [newBrandName, setNewBrandName] = useState('');
-  const [adminSettings, setAdminSettings] = useState(authService.getAdminCredentials());
   const [tempAdminMobile, setTempAdminMobile] = useState(authService.getAdminCredentials().mobile);
   const [tempAdminPassword, setTempAdminPassword] = useState(authService.getAdminCredentials().password);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
 
-  // Helper to bridge static products with backend inventory
-  const syncStaticProducts = () => {
-    const backendProducts = cartService.getProducts();
-    // This could be used to update local state if needed
-  };
+  // Receipt Settings Hooks
+  const [receiptSettings, setReceiptSettings] = useState(authService.getReceiptSettings());
+  const [rBusinessName, setRBusinessName] = useState(authService.getReceiptSettings().businessName);
+  const [rTagline, setRTagline] = useState(authService.getReceiptSettings().tagline);
+  const [rPhone, setRPhone] = useState(authService.getReceiptSettings().phone);
+  const [rAddress, setRAddress] = useState(authService.getReceiptSettings().address);
+  const [rGstin, setRGstin] = useState(authService.getReceiptSettings().gstin);
+  const [rTerms, setRTerms] = useState(authService.getReceiptSettings().terms);
+  const [rFooterBranding, setRFooterBranding] = useState(authService.getReceiptSettings().footerBranding);
+  const [rShowGstin, setRShowGstin] = useState(authService.getReceiptSettings().showGstin);
+  const [rShowPaymentMethod, setRShowPaymentMethod] = useState(authService.getReceiptSettings().showPaymentMethod);
+  const [rAccentColor, setRAccentColor] = useState(authService.getReceiptSettings().accentColor);
+  const [rBalanceDueDate, setRBalanceDueDate] = useState((authService.getReceiptSettings() as any).balanceDueDate || '');
+  const [rWhatsappNumber, setRWhatsappNumber] = useState((authService.getReceiptSettings() as any).whatsappNumber || '');
+
+  // WhatsApp Reminder (per-send fields)
+  const [reminderCustomerName, setReminderCustomerName] = useState('');
+  const [reminderCustomerPhone, setReminderCustomerPhone] = useState('');
+  const [reminderBalance, setReminderBalance] = useState('');
+  const [reminderTotalAmount, setReminderTotalAmount] = useState('');
+  const [reminderCurrentAmount, setReminderCurrentAmount] = useState('');
+
+  // Customer Creation
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerPassword, setNewCustomerPassword] = useState('');
+  const [newCustomerAddress, setNewCustomerAddress] = useState('');
+
+  // Employee Creation
+  const [newEmpMobile, setNewEmpMobile] = useState('');
+  const [newEmpPassword, setNewEmpPassword] = useState('');
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [localEmployees, setLocalEmployees] = useState<any[]>(authService.getEmployeeCredentials());
+
   const [employeeList, setEmployeeList] = useState<any[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<any>(null);
 
@@ -104,6 +145,12 @@ const AdminDashboard = ({ navigation }: any) => {
       setBrandList([...cartService.getBrands()]);
       setInventoryList([...cartService.getProducts()]);
     };
+
+    const updateAuth = () => {
+      const currentReceipt = authService.getReceiptSettings();
+      setReceiptSettings(currentReceipt);
+      setLocalEmployees([...authService.getEmployeeCredentials()]);
+    };
     
     // Initial fetch
     cartService.apiFetchProducts();
@@ -112,7 +159,12 @@ const AdminDashboard = ({ navigation }: any) => {
     cartService.apiFetchEmployees().then(setEmployeeList).catch(err => console.log('Emp fetch err:', err));
 
     cartService.on('change', update);
-    return () => cartService.off('change', update);
+    authService.on('change', updateAuth);
+    
+    return () => {
+      cartService.off('change', update);
+      authService.off('change', updateAuth);
+    };
   }, []);
 
   const StatCard = ({ title, value, icon, color }: any) => (
@@ -171,13 +223,15 @@ const AdminDashboard = ({ navigation }: any) => {
 
   const renderBulkOrder = ({ item }: { item: any }) => (
     <View style={styles.orderCard}>
-      <View style={styles.orderHeader}>
-        <View>
-          <View style={styles.bulkBadge}>
-            <Text style={styles.bulkBadgeText}>BULK TOKEN</Text>
+      {/* Token Number Header */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={[styles.bulkBadge, { backgroundColor: Colors.primary }]}>
+            <Text style={[styles.bulkBadgeText, { color: Colors.white }]}>🎫 TOKEN</Text>
           </View>
-          <Text style={styles.orderUser}>{item.name || 'Bulk Order User'}</Text>
-          <Text style={styles.orderPhone}>{item.phone}</Text>
+          <Text style={{ fontSize: 20, fontWeight: 'bold', color: Colors.primary, letterSpacing: 1 }}>
+            {item.id}
+          </Text>
         </View>
         <View style={[
           styles.statusBadge, 
@@ -191,34 +245,132 @@ const AdminDashboard = ({ navigation }: any) => {
           ]}>{item.status}</Text>
         </View>
       </View>
-      
-      <View style={styles.orderItems}>
-        <View style={styles.detailRow}>
-          <Package size={14} color={Colors.textSecondary} />
-          <Text style={styles.detailText}>{item.bags} Bags</Text>
+
+      {/* Divider */}
+      <View style={{ height: 1, backgroundColor: Colors.border, marginBottom: 10 }} />
+
+      {/* Customer Info */}
+      <View style={styles.orderHeader}>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <Text style={{ fontSize: 11, color: Colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Name</Text>
+          </View>
+          <Text style={[styles.orderUser, { marginTop: 0 }]}>{item.name || 'Bulk Order Customer'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+            <Text style={{ fontSize: 11, color: Colors.textSecondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Phone</Text>
+          </View>
+          <Text style={[styles.orderPhone, { marginTop: 2 }]}>{item.phone ? `📞 ${item.phone}` : '—  No phone'}</Text>
         </View>
-        <View style={styles.detailRow}>
-          <MapPin size={14} color={Colors.textSecondary} />
-          <Text style={styles.detailText} numberOfLines={1}>{item.location}</Text>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ fontSize: 11, color: Colors.textSecondary }}>{item.date}</Text>
+          <Text style={{ fontSize: 10, color: Colors.textSecondary }}>{item.time}</Text>
         </View>
-        <View style={styles.detailRow}>
-          <Truck size={14} color={Colors.primary} />
-          <Text style={[styles.detailText, { color: Colors.primary, fontWeight: 'bold' }]}>
-            Truck: {item.truckNo || 'Not Assigned'}
-          </Text>
+      </View>
+
+      {/* Order Details Grid */}
+      <View style={{ backgroundColor: '#F8F9FA', borderRadius: 12, padding: 16, marginTop: 12, borderWidth: 1, borderColor: Colors.border }}>
+        {/* Row 1: Brand and Quantity */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+            <Package size={18} color={Colors.accent} style={{ marginRight: 8 }} />
+            <View>
+              <Text style={{ fontSize: 11, color: Colors.textSecondary, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>Brand</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text }}>{item.brand || item.categoryName || 'Cement'}</Text>
+            </View>
+          </View>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+            <Package size={18} color={Colors.primary} style={{ marginRight: 8 }} />
+            <View>
+              <Text style={{ fontSize: 11, color: Colors.textSecondary, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>No of Bags</Text>
+              <Text style={{ fontSize: 15, fontWeight: 'bold', color: Colors.text }}>{item.bags} Bags</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Row 2: Location */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+            <MapPin size={18} color={'#E53935'} style={{ marginRight: 8 }} />
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Text style={{ fontSize: 11, color: Colors.textSecondary, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>Delivery Location</Text>
+              <Text style={{ fontSize: 13, fontWeight: '500', color: Colors.text, lineHeight: 18 }} numberOfLines={2}>{item.location || 'N/A'}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Row 3: Delivery Date */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14 }}>
+          <FileText size={18} color={Colors.textSecondary} style={{ marginRight: 8, marginTop: 1 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, color: Colors.textSecondary, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Delivery Date & Time</Text>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text, lineHeight: 18 }}>
+              {item.deliveryDate
+                ? (!isNaN(new Date(item.deliveryDate).getTime())
+                    ? new Date(item.deliveryDate).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : item.deliveryDate)
+                : 'TBD'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Row 4: Payment */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+          <Coins size={18} color={Colors.success} style={{ marginRight: 8 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, color: Colors.textSecondary, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Payment Type</Text>
+            <Text style={{ fontSize: 14, fontWeight: 'bold', color: Colors.success, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {item.paymentType || item.transactionType || 'N/A'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Row 4: Truck Assignment */}
+        <View style={{ backgroundColor: Colors.white, borderRadius: 8, padding: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' }}>
+          <Truck size={20} color={Colors.primary} style={{ marginRight: 12 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, color: Colors.textSecondary, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>Assigned Truck</Text>
+            <Text style={{ fontSize: 15, fontWeight: 'bold', color: Colors.primary }}>{item.truckNo || 'Not Assigned'}</Text>
+          </View>
         </View>
       </View>
       
-      <View style={styles.actionButtons}>
+      <View style={[styles.actionButtons, { marginTop: 12, alignItems: 'center' }]}>
+        {/* Print Button */}
         <TouchableOpacity 
-          style={styles.secondaryAction}
+          style={[styles.secondaryAction, { paddingHorizontal: 12, marginRight: 8, height: 40, justifyContent: 'center' }]}
           onPress={() => {
-            setEditingTruckOrder(item);
-            setTempTruckNo(item.truckNo || '');
-            setShowTruckModal(true);
+            const mockOrder = {
+              ...item,
+              items: [{
+                name: `${item.brand || item.categoryName || 'Cement'}`,
+                qty: `${item.bags} Bags`,
+                price: item.total || 0,
+              }],
+              total: item.total || 0,
+              paymentMethod: item.paymentType || item.transactionType || 'CASH'
+            };
+            setSelectedOrder(mockOrder);
+            setShowReceipt(true);
           }}
         >
-          <Text style={styles.actionBtnText}>Assign Truck</Text>
+          <Printer size={18} color={Colors.textSecondary} />
+        </TouchableOpacity>
+
+        {/* Customize Button */}
+        <TouchableOpacity 
+          style={[styles.secondaryAction, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
+          onPress={() => {
+            setCustomizingOrder(item);
+            setCustomBags(String(item.bags || ''));
+            setCustomLocation(item.location || '');
+            setCustomTruckNo(item.truckNo || '');
+            setCustomDeliveryDate(item.deliveryDate || '');
+            setCustomPaymentType(item.paymentType || '');
+            setCustomStatus(item.status || 'In Queue');
+            setShowCustomizeBulkModal(true);
+          }}
+        >
+          <Text style={styles.actionBtnText}>✏️ Customize</Text>
         </TouchableOpacity>
         
         {item.status === 'In Queue' && (
@@ -230,12 +382,28 @@ const AdminDashboard = ({ navigation }: any) => {
           </TouchableOpacity>
         )}
         
-        {item.status === 'Dispatched' && (
+        {(item.status === 'Dispatched' || item.status === 'Pending') && (
           <TouchableOpacity 
             style={[styles.primaryAction, { backgroundColor: Colors.success }]}
-            onPress={() => cartService.updateBulkOrder(item.id, { status: 'Delivered' })}
+            onPress={() => {
+              Alert.alert(
+                'Complete Order',
+                'Mark this bulk order as fully completed and delivered?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Complete',
+                    style: 'default',
+                    onPress: () => {
+                      cartService.updateBulkOrder(item.id, { status: 'Delivered' });
+                      Alert.alert('Done!', 'Order marked as completed ✅');
+                    }
+                  }
+                ]
+              );
+            }}
           >
-            <Text style={styles.primaryActionText}>Mark Delivered</Text>
+            <Text style={styles.primaryActionText}>✅ Complete Order</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -361,7 +529,7 @@ const AdminDashboard = ({ navigation }: any) => {
                 total: billData.total_amount
               });
               setShowReceipt(true);
-            } catch (e) {
+            } catch {
               // Fallback to current item if API fails
               setSelectedOrder(item);
               setShowReceipt(true);
@@ -425,7 +593,7 @@ const AdminDashboard = ({ navigation }: any) => {
       };
       
       // Call API
-      const result = await cartService.apiAddProduct(product);
+      await cartService.apiAddProduct(product);
       
       // Refresh list from server to get correct IDs etc.
       await cartService.apiFetchProducts();
@@ -452,36 +620,38 @@ const AdminDashboard = ({ navigation }: any) => {
             <style>
               body { font-family: 'Helvetica'; padding: 40px; color: #333; }
               .header { text-align: center; margin-bottom: 30px; }
-              .logo { font-size: 28px; font-weight: bold; color: ${Colors.primary}; }
+              .logo { font-size: 28px; font-weight: bold; color: ${receiptSettings.accentColor}; text-transform: uppercase; letter-spacing: 0.5px; }
+              .tagline { font-size: 12px; color: #666; margin-top: 4px; }
+              .store-info { font-size: 11px; color: #666; margin-top: 6px; }
               .order-info { margin-bottom: 30px; border-bottom: 1px dashed #ccc; padding-bottom: 15px; }
               .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
               .label { font-weight: bold; color: #666; }
               table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-              th { border-bottom: 2px solid ${Colors.primary}; text-align: left; padding: 10px; }
+              th { border-bottom: 2px solid ${receiptSettings.accentColor}; text-align: left; padding: 10px; font-weight: bold; }
               td { padding: 10px; border-bottom: 1px solid #eee; }
-              .total-row { margin-top: 20px; text-align: right; font-size: 20px; font-weight: bold; }
-              .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #999; }
-              .branding { color: ${Colors.primary}; font-weight: bold; margin-top: 10px; }
+              .total-row { margin-top: 20px; text-align: right; font-size: 20px; font-weight: bold; color: ${receiptSettings.accentColor}; }
+              .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #999; border-top: 1px dashed #ccc; padding-top: 15px; }
+              .branding { color: ${receiptSettings.accentColor}; font-weight: bold; margin-top: 10px; }
             </style>
           </head>
           <body>
             <div class="header">
-              <div class="logo">MANOJ STEELS</div>
-              <div style="font-size: 12px; color: #666;">B2B Building Materials Platform</div>
+              <div class="logo">${receiptSettings.businessName}</div>
+              ${receiptSettings.tagline ? `<div class="tagline">${receiptSettings.tagline}</div>` : ''}
             </div>
 
             <div class="order-info">
               <div class="info-row">
                 <span><span class="label">Bill No:</span> ${selectedOrder.id}</span>
-                <span><span class="label">Date:</span> ${new Date().toLocaleDateString()}</span>
+                <span><span class="label">Date & Time:</span> ${new Date().toLocaleString()}</span>
               </div>
               <div class="info-row">
                 <span><span class="label">Customer:</span> ${selectedOrder.name || selectedOrder.user || 'Manoj Steels User'}</span>
                 <span><span class="label">Phone:</span> ${selectedOrder.phone || 'N/A'}</span>
               </div>
               <div class="info-row">
-                <span><span class="label">Payment:</span> ${selectedOrder.paymentMethod || 'CASH'}</span>
                 <span><span class="label">Employee:</span> ${selectedEmployee?.name || selectedOrder.employeeName || 'Admin'}</span>
+                ${receiptSettings.showPaymentMethod ? `<span><span class="label">Payment:</span> ${selectedOrder.paymentMethod || 'CASH'}</span>` : ''}
               </div>
             </div>
 
@@ -511,31 +681,79 @@ const AdminDashboard = ({ navigation }: any) => {
             </div>
 
             <div class="footer">
-              <p>Terms: Goods once sold cannot be returned.</p>
-              <div class="branding">~ Manoj Steels ~</div>
+              ${receiptSettings.terms ? `<p>${receiptSettings.terms}</p>` : ''}
+              ${receiptSettings.footerBranding ? `<div class="branding">${receiptSettings.footerBranding}</div>` : ''}
             </div>
           </body>
         </html>
       `;
 
-      const options = {
+      const safeFileName = `Bill_${String(selectedOrder.id).replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+      const pdfOptions = {
         html: htmlContent,
-        fileName: `Receipt_${selectedOrder.id}`,
-        directory: 'Documents',
+        fileName: safeFileName,
+        directory: 'Download',
+        width: 595,
+        height: 842,
+        base64: true,
       };
 
-      const file = await generatePDF(options);
+      const file = await generatePDF(pdfOptions);
       
-      if (file.filePath) {
-        await Share.open({
-          url: `file://${file.filePath}`,
-          type: 'application/pdf',
-          title: 'View Receipt',
-        });
+      if (file && file.filePath) {
+        try {
+          const fileUri = file.filePath.startsWith('file://')
+            ? file.filePath
+            : `file://${file.filePath}`;
+          
+          await Share.open({
+            url: fileUri,
+            type: 'application/pdf',
+            title: `Bill Receipt - ${selectedOrder.id}`,
+            message: `${receiptSettings.businessName} Bill Receipt | Order: ${selectedOrder.id} | Total: Rs.${Number(selectedOrder.total || 0).toLocaleString('en-IN')}`,
+            failOnCancel: false,
+          });
+        } catch (shareError: any) {
+          console.log('File URI share failed, trying secure base64 share:', shareError);
+          // If the user cancelled, don't fallback, just raise the cancel
+          if (
+            shareError?.message?.includes('User did not share') ||
+            shareError?.message?.includes('cancel') ||
+            shareError?.error === 'CANCELLED'
+          ) {
+            throw shareError;
+          }
+
+          if (file.base64) {
+            await Share.open({
+              url: `data:application/pdf;base64,${file.base64}`,
+              type: 'application/pdf',
+              title: `Bill Receipt - ${selectedOrder.id}`,
+              message: `${receiptSettings.businessName} Bill Receipt | Order: ${selectedOrder.id} | Total: Rs.${Number(selectedOrder.total || 0).toLocaleString('en-IN')}`,
+              failOnCancel: false,
+            });
+          } else {
+            throw shareError;
+          }
+        }
+      } else {
+        throw new Error('PDF file path not returned from generator');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('PDF Generation Error:', error);
-      Alert.alert('Error', 'Failed to generate PDF. Please try again.');
+      // Don't show error if user just cancelled the share sheet
+      if (
+        error?.message?.includes('User did not share') ||
+        error?.message?.includes('cancel') ||
+        error?.error === 'CANCELLED'
+      ) {
+        return;
+      }
+      Alert.alert(
+        'PDF Error',
+        'Could not generate or share PDF. Please try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
     } finally {
       setLoading(false);
     }
@@ -550,17 +768,22 @@ const AdminDashboard = ({ navigation }: any) => {
         format: 'png',
         quality: 1.0,
         result: 'tmpfile',
+        snapshotContentContainer: false,
       });
 
       await Share.open({
         url: uri,
         type: 'image/png',
-        title: 'Share Bill',
-        message: `Manoj Steels Bill - ${selectedOrder.id}`,
+        title: 'Share Bill Receipt',
+        message: `Manoj Steels Bill - ${selectedOrder.id}\nTotal: Rs.${Number(selectedOrder.total || 0).toLocaleString('en-IN')}`,
+        failOnCancel: false,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Image Capture Error:', error);
-      Alert.alert('Error', 'Failed to generate bill image.');
+      if (error?.message?.includes('User did not share') || error?.message?.includes('cancel')) {
+        return;
+      }
+      Alert.alert('Error', 'Failed to generate bill image. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -587,16 +810,18 @@ const AdminDashboard = ({ navigation }: any) => {
         </View>
       </View>
 
-      <View style={styles.tabBar}>
-        {['Orders', 'Bulk Orders', 'Inventory', 'Settings'].map((t) => (
-          <TouchableOpacity 
-            key={t} 
-            onPress={() => setActiveTab(t)}
-            style={[styles.tab, activeTab === t && styles.activeTab]}
-          >
-            <Text style={[styles.tabText, activeTab === t && styles.activeTabText]}>{t}</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.tabBarContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
+          {['Orders', 'Tokens', 'Inventory', 'Receipt Options', 'Customers', 'Employees', 'Settings'].map((t) => (
+            <TouchableOpacity 
+              key={t} 
+              onPress={() => setActiveTab(t)}
+              style={[styles.tab, activeTab === t && styles.activeTab]}
+            >
+              <Text style={[styles.tabText, activeTab === t && styles.activeTabText]}>{t}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
 
@@ -619,10 +844,10 @@ const AdminDashboard = ({ navigation }: any) => {
                     <Text style={styles.currencySymbolMini}>₹</Text>
                     <TextInput
                       style={styles.priceInputMini}
-                      value={item.price.toString()}
+                      value={item.price?.toString() === '0' ? '' : item.price?.toString() || ''}
                       onChangeText={(val) => {
                         const newItems = [...tempItems];
-                        newItems[idx].price = parseFloat(val) || 0;
+                        newItems[idx] = { ...newItems[idx], price: val };
                         setTempItems(newItems);
                       }}
                       keyboardType="numeric"
@@ -636,7 +861,7 @@ const AdminDashboard = ({ navigation }: any) => {
             <View style={styles.totalPreviewRow}>
               <Text style={styles.totalPreviewLabel}>Calculated Total:</Text>
               <Text style={styles.totalPreviewValue}>
-                ₹{tempItems.reduce((acc, i) => acc + ((i.price || 0) * (i.qty || 1)), 0).toLocaleString()}
+                ₹{tempItems.reduce((acc, i) => acc + ((parseFloat(i.price) || 0) * (i.qty || 1)), 0).toLocaleString()}
               </Text>
             </View>
 
@@ -652,14 +877,18 @@ const AdminDashboard = ({ navigation }: any) => {
                 onPress={async () => {
                   setLoading(true);
                   try {
-                    // Manual Update: Update the local order list instead of calling the API
+                    // Update price in the backend
+                    const fixedItems = tempItems.map(i => ({...i, price: parseFloat(i.price) || 0}));
+                    await cartService.apiFixPrice(editingOrderId, fixedItems);
+                    
+                    // Update local list
                     const updatedOrders = orderList.map(order => {
                       if (order.id === editingOrderId) {
                         return {
                           ...order,
                           status: 'PRICE_FIXED',
-                          items: tempItems,
-                          total: tempItems.reduce((acc: number, i: any) => acc + ((i.price || 0) * (i.qty || 1)), 0)
+                          items: fixedItems,
+                          total: fixedItems.reduce((acc: number, i: any) => acc + ((i.price || 0) * (i.qty || 1)), 0)
                         };
                       }
                       return order;
@@ -668,7 +897,7 @@ const AdminDashboard = ({ navigation }: any) => {
                     setOrderList(updatedOrders);
                     setIsEditingPrice(false);
                     Alert.alert('Success', 'Prices fixed manually.');
-                  } catch (e: any) {
+                  } catch {
                     Alert.alert('Error', 'Failed to update prices.');
                   } finally {
                     setLoading(false);
@@ -698,13 +927,12 @@ const AdminDashboard = ({ navigation }: any) => {
                 options={{ format: 'png', quality: 1.0 }}
                 style={{ backgroundColor: Colors.white, padding: 20 }}
               >
-                <View style={styles.receiptHeader}>
-                  <Image 
-                    source={require('../assets/logo.png')} 
-                    style={styles.receiptLogo}
-                    resizeMode="contain"
-                  />
-                  <View style={{ flex: 1 }} />
+                <View style={{ alignItems: 'center', marginVertical: 10 }}>
+                  <Image source={require('../assets/receipt_logo.png')} style={{ width: 250, height: 60, marginBottom: 8 }} resizeMode="contain" />
+                  {receiptSettings.businessName ? (
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: receiptSettings.accentColor, textAlign: 'center', letterSpacing: 0.5 }}>{receiptSettings.businessName}</Text>
+                  ) : null}
+                  {receiptSettings.tagline ? <Text style={{ fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: 4 }}>{receiptSettings.tagline}</Text> : null}
                 </View>
 
                 <View style={styles.receiptDivider} />
@@ -722,7 +950,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   </View>
                   <View style={styles.billRow}>
                     <Text style={styles.billLabel}>Date & Time:</Text>
-                    <Text style={styles.billValue}>{selectedOrder?.date || new Date().toLocaleDateString()} | {selectedOrder?.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                    <Text style={styles.billValue}>{new Date().toLocaleString()}</Text>
                   </View>
                   <View style={styles.billRow}>
                     <Text style={styles.billLabel}>Employee:</Text>
@@ -735,7 +963,7 @@ const AdminDashboard = ({ navigation }: any) => {
                               onPress={() => setSelectedEmployee(emp)}
                               style={[
                                 { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 5, borderWidth: 1 },
-                                selectedEmployee?.id === emp.id ? { backgroundColor: Colors.primary, borderColor: Colors.primary } : { borderColor: Colors.border }
+                                selectedEmployee?.id === emp.id ? { backgroundColor: receiptSettings.accentColor, borderColor: receiptSettings.accentColor } : { borderColor: Colors.border }
                               ]}
                             >
                               <Text style={{ fontSize: 10, color: selectedEmployee?.id === emp.id ? Colors.white : Colors.textSecondary }}>{emp.name}</Text>
@@ -743,20 +971,22 @@ const AdminDashboard = ({ navigation }: any) => {
                           ))}
                         </ScrollView>
                       ) : (
-                        <Text style={styles.billValue}>{selectedOrder?.employeeName || authService.getCurrentUser()?.username || 'Admin (Manoj)'}</Text>
+                        <Text style={styles.billValue}>{selectedOrder?.employeeName || authService.getCurrentUser()?.full_name || authService.getCurrentUser()?.name || 'Admin (Manoj)'}</Text>
                       )}
                     </View>
                   </View>
-                  <View style={styles.billRow}>
-                    <Text style={styles.billLabel}>Payment:</Text>
-                    <Text style={[styles.billValue, { color: Colors.primary, textTransform: 'uppercase' }]}>{selectedOrder?.paymentMethod || 'CASH'}</Text>
-                  </View>
+                  {receiptSettings.showPaymentMethod ? (
+                    <View style={styles.billRow}>
+                      <Text style={styles.billLabel}>Payment:</Text>
+                      <Text style={[styles.billValue, { color: receiptSettings.accentColor, textTransform: 'uppercase' }]}>{selectedOrder?.paymentMethod || 'CASH'}</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={styles.receiptDivider} />
 
                 <View style={styles.receiptTable}>
-                  <View style={styles.tableHeader}>
+                  <View style={[styles.tableHeader, { borderBottomColor: receiptSettings.accentColor, borderBottomWidth: 2, paddingBottom: 6 }]}>
                     <Text style={[styles.tableLabel, { flex: 2, color: Colors.text, fontWeight: 'bold' }]}>Product</Text>
                     <Text style={[styles.tableLabel, { textAlign: 'center', color: Colors.text, fontWeight: 'bold' }]}>Qty</Text>
                     <Text style={[styles.tableLabel, { textAlign: 'right', color: Colors.text, fontWeight: 'bold' }]}>Rate</Text>
@@ -774,41 +1004,41 @@ const AdminDashboard = ({ navigation }: any) => {
 
                 <View style={styles.receiptTotalRow}>
                   <Text style={styles.receiptTotalLabel}>Grand Total</Text>
-                  <Text style={styles.receiptTotalValue}>₹{(selectedOrder?.total || 0).toLocaleString()}</Text>
+                  <Text style={[styles.receiptTotalValue, { color: receiptSettings.accentColor, fontWeight: 'bold', fontSize: 18 }]}>₹{(selectedOrder?.total || 0).toLocaleString()}</Text>
                 </View>
 
-                <Text style={styles.receiptFooter}>Terms: Goods once sold cannot be returned.</Text>
-                <Text style={styles.receiptBranding}>~ Manoj Steels ~</Text>
+                {receiptSettings.terms ? <Text style={styles.receiptFooter}>{receiptSettings.terms}</Text> : null}
+                {receiptSettings.footerBranding ? <Text style={[styles.receiptBranding, { color: receiptSettings.accentColor }]}>{receiptSettings.footerBranding}</Text> : null}
               </ViewShot>
 
               <View style={[styles.receiptDivider, { marginHorizontal: 20 }]} />
 
-              <View style={{ paddingHorizontal: 20 }}>
+              <View style={{ paddingHorizontal: 20, gap: 10 }}>
                 <TouchableOpacity 
-                  style={[styles.printFinalBtn, { backgroundColor: Colors.success, marginBottom: 15 }]}
-                  onPress={handleDownloadImage}
-                >
-                  <ShoppingBag size={20} color={Colors.white} />
-                  <Text style={styles.printFinalText}>Download Bill (Image)</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={[styles.printFinalBtn, { backgroundColor: Colors.accent, marginBottom: 15 }]}
+                  style={[styles.printFinalBtn, { backgroundColor: receiptSettings.accentColor, marginTop: 10 }]}
                   onPress={handleDownloadPDF}
                 >
                   <FileText size={20} color={Colors.white} />
-                  <Text style={styles.printFinalText}>Download PDF</Text>
+                  <Text style={styles.printFinalText}>Download PDF Invoice</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity 
-                  style={styles.printFinalBtn}
+                  style={[styles.printFinalBtn, { backgroundColor: Colors.surface, borderWidth: 1, borderColor: receiptSettings.accentColor, marginTop: 0 }]}
+                  onPress={handleDownloadImage}
+                >
+                  <Printer size={20} color={receiptSettings.accentColor} />
+                  <Text style={[styles.printFinalText, { color: receiptSettings.accentColor }]}>Share Receipt Image</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.printFinalBtn, { backgroundColor: '#4F5E7B', marginTop: 0 }]}
                   onPress={() => {
                     Alert.alert('Success', 'Sending to Bluetooth Printer...');
                     setShowReceipt(false);
                   }}
                 >
                   <Printer size={20} color={Colors.white} />
-                  <Text style={styles.printFinalText}>Print Invoice</Text>
+                  <Text style={styles.printFinalText}>Print to Bluetooth</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -816,40 +1046,153 @@ const AdminDashboard = ({ navigation }: any) => {
         </View>
       </Modal>
 
-      {/* Truck Assignment Modal */}
-      <Modal visible={showTruckModal} transparent animationType="fade">
+      {/* Customize Bulk Order Modal */}
+      <Modal visible={showCustomizeBulkModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.priceEditContainer}>
-            <Text style={styles.priceEditTitle}>Assign Truck Number</Text>
-            <Text style={styles.priceEditSubtitle}>Order: {editingTruckOrder?.id}</Text>
+          <View style={[styles.priceEditContainer, { width: '92%', maxHeight: '88%', borderRadius: 20 }]}>
             
-            <View style={styles.priceInputMiniWrapper}>
-              <Truck size={20} color={Colors.primary} style={{ marginRight: 10 }} />
-              <TextInput
-                style={[styles.priceInputMini, { fontSize: 18, width: 200 }]}
-                value={tempTruckNo}
-                onChangeText={(t) => setTempTruckNo(t.toUpperCase())}
-                placeholder="e.g. TN 01 AB 1234"
-                autoCapitalize="characters"
-              />
+            {/* Modal Header */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <View>
+                <Text style={styles.priceEditTitle}>✏️ Customize Order</Text>
+                <Text style={[styles.priceEditSubtitle, { color: Colors.primary, fontWeight: 'bold' }]}>
+                  Token: {customizingOrder?.id}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowCustomizeBulkModal(false)} style={{ padding: 6 }}>
+                <X size={22} color={Colors.textSecondary} />
+              </TouchableOpacity>
             </View>
 
-            <View style={[styles.priceEditActions, { marginTop: 30 }]}>
+            <View style={{ height: 1, backgroundColor: Colors.border, marginBottom: 14 }} />
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
+
+              {/* Status Selector */}
+              <Text style={[styles.itemNameLabel, { marginBottom: 8 }]}>Order Status</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                {['In Queue', 'Dispatched', 'Delivered'].map(s => (
+                  <TouchableOpacity
+                    key={s}
+                    onPress={() => setCustomStatus(s)}
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 7,
+                      borderRadius: 20,
+                      borderWidth: 1.5,
+                      borderColor: customStatus === s ? Colors.primary : Colors.border,
+                      backgroundColor: customStatus === s ? Colors.primary + '15' : 'transparent',
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: customStatus === s ? Colors.primary : Colors.textSecondary }}>
+                      {s}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Truck Number */}
+              <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>🚛 Truck Number</Text>
+              <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 48 }]}>
+                <Truck size={18} color={Colors.primary} style={{ marginRight: 8 }} />
+                <TextInput
+                  style={[styles.priceInputMini, { flex: 1, fontSize: 15 }]}
+                  value={customTruckNo}
+                  onChangeText={(t) => setCustomTruckNo(t.toUpperCase())}
+                  placeholder="e.g. TN 01 AB 1234"
+                  autoCapitalize="characters"
+                />
+              </View>
+
+              {/* Number of Bags */}
+              <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>📦 Number of Bags</Text>
+              <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 48 }]}>
+                <Package size={18} color={Colors.primary} style={{ marginRight: 8 }} />
+                <TextInput
+                  style={[styles.priceInputMini, { flex: 1, fontSize: 15 }]}
+                  value={customBags}
+                  onChangeText={setCustomBags}
+                  keyboardType="numeric"
+                  placeholder="e.g. 100"
+                />
+              </View>
+
+              {/* Delivery Location */}
+              <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>📍 Delivery Location</Text>
+              <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 'auto', minHeight: 52, paddingVertical: 12, alignItems: 'flex-start' }]}>
+                <MapPin size={18} color={Colors.primary} style={{ marginRight: 8, marginTop: 2 }} />
+                <TextInput
+                  style={[styles.priceInputMini, { flex: 1, fontSize: 14, lineHeight: 20 }]}
+                  value={customLocation}
+                  onChangeText={setCustomLocation}
+                  placeholder="Full delivery address"
+                  multiline
+                  numberOfLines={2}
+                />
+              </View>
+
+              {/* Delivery Date */}
+              <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>📅 Delivery Date</Text>
+              <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 48 }]}>
+                <FileText size={18} color={Colors.primary} style={{ marginRight: 8 }} />
+                <TextInput
+                  style={[styles.priceInputMini, { flex: 1, fontSize: 15 }]}
+                  value={customDeliveryDate}
+                  onChangeText={setCustomDeliveryDate}
+                  placeholder="YYYY-MM-DD"
+                />
+              </View>
+
+              {/* Payment Type */}
+              <Text style={[styles.itemNameLabel, { marginBottom: 8 }]}>💳 Payment Type</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+                {['cash', 'online', 'credit'].map(p => (
+                  <TouchableOpacity
+                    key={p}
+                    onPress={() => setCustomPaymentType(p)}
+                    style={{
+                      paddingHorizontal: 18,
+                      paddingVertical: 8,
+                      borderRadius: 20,
+                      borderWidth: 1.5,
+                      borderColor: customPaymentType === p ? Colors.success : Colors.border,
+                      backgroundColor: customPaymentType === p ? Colors.success + '15' : 'transparent',
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: customPaymentType === p ? Colors.success : Colors.textSecondary, textTransform: 'capitalize' }}>
+                      {p}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+            </ScrollView>
+
+            {/* Action Buttons */}
+            <View style={[styles.priceEditActions, { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.border }]}>
               <TouchableOpacity 
                 style={styles.cancelPriceBtn}
-                onPress={() => setShowTruckModal(false)}
+                onPress={() => setShowCustomizeBulkModal(false)}
               >
                 <Text style={styles.cancelPriceText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={styles.savePriceBtn}
+                style={[styles.savePriceBtn, { flex: 1.5 }]}
                 onPress={() => {
-                  cartService.updateBulkOrder(editingTruckOrder.id, { truckNo: tempTruckNo });
-                  setShowTruckModal(false);
-                  Alert.alert('Success', 'Truck number updated.');
+                  if (!customizingOrder) return;
+                  cartService.updateBulkOrder(customizingOrder.id, {
+                    status: customStatus,
+                    truckNo: customTruckNo,
+                    bags: parseInt(customBags) || customizingOrder.bags,
+                    location: customLocation,
+                    deliveryDate: customDeliveryDate,
+                    paymentType: customPaymentType,
+                  });
+                  setShowCustomizeBulkModal(false);
+                  Alert.alert('✅ Updated', 'Bulk order has been updated successfully!');
                 }}
               >
-                <Text style={styles.savePriceText}>Save Truck No</Text>
+                <Text style={styles.savePriceText}>Save Changes</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -968,9 +1311,9 @@ const AdminDashboard = ({ navigation }: any) => {
               />
             </View>
           </>
-        ) : activeTab === 'Bulk Orders' ? (
+        ) : activeTab === 'Tokens' ? (
           <View style={styles.section}>
-            <Text style={[Typography.h3, styles.sectionTitle]}>Bulk Order Management</Text>
+            <Text style={[Typography.h3, styles.sectionTitle]}>Token Management</Text>
             
             <View style={styles.brandManageCard}>
               <Text style={[styles.inputLabel, { marginBottom: 10 }]}>Manage Selectable Brands</Text>
@@ -1018,6 +1361,638 @@ const AdminDashboard = ({ navigation }: any) => {
                 keyExtractor={(item) => item.id}
                 scrollEnabled={false}
               />
+            )}
+          </View>
+        ) : activeTab === 'Receipt Options' ? (
+          <View style={styles.section}>
+            <Text style={[Typography.h3, styles.sectionTitle]}>Receipt Settings & Customization</Text>
+            {/* Quick Select Presets - Moved to Top */}
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+              <TouchableOpacity 
+                activeOpacity={0.7}
+                style={{ flex: 1, backgroundColor: rBusinessName === 'MANOJ STEELS' ? Colors.primary : Colors.surface, padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: Colors.primary, alignItems: 'center' }}
+                onPress={() => {
+                  setRBusinessName('MANOJ STEELS');
+                  setRPhone('9994488447, 9364476444');
+                  setRAddress('201, Sathy Aathani main road, TN palayam');
+                  setRBalanceDueDate('');
+                  setRFooterBranding('~ Manoj Steels ~');
+                  setRAccentColor('#1877F2'); // Classic Blue
+                }}
+              >
+                <Text style={{ color: rBusinessName === 'MANOJ STEELS' ? Colors.white : Colors.primary, fontWeight: 'bold', fontSize: 14 }}>Manoj Steels</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                activeOpacity={0.7}
+                style={{ flex: 1, backgroundColor: rBusinessName === 'ANANTH CEMENT AND STEELS' ? '#E65100' : Colors.surface, padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#E65100', alignItems: 'center' }}
+                onPress={() => {
+                  setRBusinessName('ANANTH CEMENT AND STEELS');
+                  setRPhone('9600612632, 9364476444');
+                  setRAddress('201, Sathy Aathani main road, TN palayam');
+                  setRBalanceDueDate('');
+                  setRFooterBranding('~ Ananth Cement and Steels ~');
+                  setRAccentColor('#FF9800'); // Warning Amber
+                }}
+              >
+                <Text style={{ color: rBusinessName === 'ANANTH CEMENT AND STEELS' ? Colors.white : '#E65100', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>Ananth Cement and Steels</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Live Receipt Mock Preview */}
+            <Text style={[styles.inputLabel, { marginBottom: 8, fontWeight: 'bold' }]}>Live Receipt Preview</Text>
+            <View ref={liveReceiptRef} collapsable={false} style={[styles.mockReceiptContainer, { borderColor: rAccentColor, backgroundColor: Colors.white }]}>
+              <View style={styles.mockTearOff} />
+              <View style={styles.mockReceiptContent}>
+                <View style={{ alignItems: 'center', marginBottom: 6 }}>
+                  <Image 
+                    source={rBusinessName === 'ANANTH CEMENT AND STEELS' ? require('../assets/ananth_receipt_logo.png') : require('../assets/receipt_logo.png')} 
+                    style={{ 
+                      width: rBusinessName === 'ANANTH CEMENT AND STEELS' ? '95%' : '80%', 
+                      height: rBusinessName === 'ANANTH CEMENT AND STEELS' ? 70 : 40, 
+                      marginBottom: 4 
+                    }} 
+                    resizeMode="contain" 
+                  />
+                  <Text style={[styles.mockReceiptTitle, { color: rAccentColor, fontSize: 14 }]}>{rBusinessName || 'BUSINESS NAME'}</Text>
+                </View>
+                
+                <View style={styles.mockReceiptDivider} />
+                
+                <View style={{ alignItems: 'center', paddingHorizontal: 16, paddingBottom: 6 }}>
+                  <Text style={{ fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4, lineHeight: 18 }}>
+                    📍 {rAddress || 'Business Address'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4 }}>
+                    📞 {rPhone || '9876543210'}
+                  </Text>
+                  {rShowPaymentMethod ? <Text style={{ fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4 }}>💳 Payment: CASH / CREDIT</Text> : null}
+                  {rBalanceDueDate ? <Text style={{ fontSize: 12, color: '#E53935', fontWeight: 'bold', textAlign: 'center' }}>⚠️ Balance Due By: {rBalanceDueDate}</Text> : null}
+                </View>
+                
+                <View style={{ marginVertical: 12, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#D32F2F', marginBottom: 12, textAlign: 'center' }}>
+                    Kindly Make payment as soon as Possible
+                  </Text>
+                  
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                    <Image source={require('../assets/gpay_icon.png')} style={{ width: 40, height: 20, marginRight: 8 }} resizeMode="contain" />
+                    <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1F2937', letterSpacing: 1 }}>
+                      {rBusinessName === 'ANANTH CEMENT AND STEELS' ? '7094488447' : '8124488447'}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={[styles.mockReceiptDivider, { borderStyle: 'dashed' }]} />
+                
+                {rTerms ? <Text style={styles.mockTermsText}>{rTerms}</Text> : null}
+                {rFooterBranding ? <Text style={[styles.mockFooterBranding, { color: rAccentColor }]}>{rFooterBranding}</Text> : null}
+              </View>
+              <View style={styles.mockTearOff} />
+            </View>
+
+            {/* Print Bill Button for Live Receipt */}
+            <TouchableOpacity 
+              style={{ backgroundColor: Colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12, borderRadius: 10, marginTop: 15, alignSelf: 'center', width: '90%', elevation: 3 }}
+              onPress={async () => {
+                try {
+                  const uri = await captureRef(liveReceiptRef, { format: 'png', quality: 1.0 });
+                  await Share.open({ url: uri, type: 'image/png', title: 'Print Receipt Preview' });
+                } catch(e) {}
+              }}
+            >
+              <Printer size={20} color="white" style={{ marginRight: 8 }} />
+              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Print Bill</Text>
+            </TouchableOpacity>
+
+            {/* Calendar Modal */}
+            <Modal visible={showCalendar} transparent={true} animationType="fade">
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                <View style={{ width: '90%', backgroundColor: 'white', borderRadius: 10, overflow: 'hidden' }}>
+                  <Calendar
+                    onDayPress={(day: any) => {
+                      const parts = day.dateString.split('-');
+                      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                      const formatted = `${parts[2]}-${months[parseInt(parts[1], 10)-1]}-${parts[0]}`;
+                      setRBalanceDueDate(formatted);
+                      setShowCalendar(false);
+                    }}
+                    theme={{
+                      selectedDayBackgroundColor: Colors.primary,
+                      todayTextColor: Colors.primary,
+                      arrowColor: Colors.primary,
+                    }}
+                  />
+                  <TouchableOpacity onPress={() => setShowCalendar(false)} style={{ padding: 15, alignItems: 'center', borderTopWidth: 1, borderColor: '#eee' }}>
+                    <Text style={{ color: Colors.error, fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+            {/* ── Customization Form ── */}
+            <View style={[styles.brandManageCard, { marginTop: 20 }]}>
+              <Text style={[styles.inputLabel, { fontSize: 16, marginBottom: 15, color: Colors.primary }]}>Customize Header Info</Text>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Business Name</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={rBusinessName}
+                  onChangeText={setRBusinessName}
+                  placeholder="e.g. MANOJ STEELS"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Contact Phone Number</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={rPhone}
+                  onChangeText={setRPhone}
+                  keyboardType="phone-pad"
+                  placeholder="e.g. 9876543210"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Business Address</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={rAddress}
+                  onChangeText={setRAddress}
+                  placeholder="e.g. 123 Main Bazaar Road"
+                />
+              </View>
+
+              {/* Balance Amount Due Date */}
+              <View style={[styles.formGroup, { backgroundColor: '#FFF8E1', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#FFD54F' }]}>
+                <Text style={[styles.inputLabel, { color: '#E65100', fontWeight: 'bold', marginBottom: 4 }]}>⏰ Balance Amount Due Date</Text>
+                <Text style={{ fontSize: 11, color: '#BF360C', marginBottom: 10 }}>
+                  This date will appear on all receipts as the balance payment deadline.
+                </Text>
+                <TouchableOpacity 
+                  style={[styles.adminInput, { borderColor: '#FF8F00', backgroundColor: Colors.white, justifyContent: 'center' }]}
+                  onPress={() => setShowCalendar(true)}
+                >
+                  <Text style={{ color: rBalanceDueDate ? Colors.text : Colors.textSecondary, fontSize: 15 }}>
+                    {rBalanceDueDate || 'Select Date (e.g. 31-May-2026)'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.inputLabel, { fontSize: 16, marginTop: 20, marginBottom: 15, color: Colors.primary }]}>Terms & Display Controls</Text>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Terms & Conditions Note</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={rTerms}
+                  onChangeText={setRTerms}
+                  placeholder="e.g. Goods once sold cannot be returned."
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Footer Branding Text</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={rFooterBranding}
+                  onChangeText={setRFooterBranding}
+                  placeholder="e.g. ~ Manoj Steels ~"
+                />
+              </View>
+
+              {/* Toggle: Payment Method */}
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Display Payment Method (Cash/Credit)</Text>
+                <TouchableOpacity 
+                  onPress={() => setRShowPaymentMethod(!rShowPaymentMethod)}
+                  style={[styles.switchTrack, rShowPaymentMethod ? styles.switchTrackActive : styles.switchTrackInactive]}
+                >
+                  <View style={[styles.switchThumb, rShowPaymentMethod ? styles.switchThumbActive : styles.switchThumbInactive]} />
+                </TouchableOpacity>
+              </View>
+
+
+
+              <TouchableOpacity 
+                style={[styles.saveProductBtn, { marginTop: 25 }]}
+                onPress={async () => {
+                  setLoading(true);
+                  try {
+                    const success = await authService.updateReceiptSettings({
+                      businessName: rBusinessName.trim(),
+                      tagline: rTagline.trim(),
+                      phone: rPhone.trim(),
+                      address: rAddress.trim(),
+                      gstin: rGstin.trim(),
+                      terms: rTerms.trim(),
+                      footerBranding: rFooterBranding.trim(),
+                      showGstin: rShowGstin,
+                      showPaymentMethod: rShowPaymentMethod,
+                      accentColor: rAccentColor,
+                      balanceDueDate: rBalanceDueDate.trim(),
+                      whatsappNumber: rWhatsappNumber.trim(),
+                    });
+                    
+                    if (success) {
+                      Alert.alert('Success', 'Receipt customization options saved successfully.');
+                    } else {
+                      Alert.alert('Error', 'Failed to save receipt settings.');
+                    }
+                  } catch {
+                    Alert.alert('Error', 'An error occurred while saving.');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.saveProductText}>Save Receipt Customization</Text>}
+              </TouchableOpacity>
+            </View>
+
+            {/* ── WhatsApp Payment Reminder Section ── */}
+            <View style={[styles.brandManageCard, { marginTop: 20, borderWidth: 2, borderColor: '#25D366' }]}>
+              {/* Header */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#25D366', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                  <Text style={{ fontSize: 20 }}>💬</Text>
+                </View>
+                <View>
+                  <Text style={[styles.inputLabel, { fontSize: 16, color: '#128C7E', fontWeight: 'bold', marginBottom: 0 }]}>WhatsApp Payment Reminder</Text>
+                  <Text style={{ fontSize: 11, color: Colors.textSecondary }}>Send a payment reminder directly via WhatsApp</Text>
+                </View>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: '#E0F2F1', marginVertical: 12 }} />
+
+              {/* Default WhatsApp Number (store) */}
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Your WhatsApp Business Number</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#25D366', borderRadius: 10, backgroundColor: Colors.white, overflow: 'hidden' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 14, borderRightWidth: 1, borderRightColor: '#25D366' }}>
+                    <Text style={{ fontSize: 16 }}>🇮🇳</Text>
+                    <Text style={{ marginLeft: 4, fontWeight: 'bold', color: '#128C7E', fontSize: 14 }}>+91</Text>
+                  </View>
+                  <TextInput
+                    style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: Colors.text }}
+                    value={rWhatsappNumber}
+                    onChangeText={(t) => setRWhatsappNumber(t.replace(/\D/g, '').slice(0, 10))}
+                    keyboardType="phone-pad"
+                    placeholder="9876543210"
+                    placeholderTextColor={Colors.textSecondary}
+                    maxLength={10}
+                  />
+                </View>
+                <Text style={{ fontSize: 10, color: Colors.textSecondary, marginTop: 4 }}>
+                  Enter 10-digit number. Country code +91 is added automatically.
+                </Text>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: '#E8F5E9', marginVertical: 12 }} />
+
+              {/* Reminder Form */}
+              <Text style={[styles.inputLabel, { color: '#128C7E', fontWeight: 'bold', marginBottom: 12 }]}>Send Reminder to Customer</Text>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Customer Name</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={reminderCustomerName}
+                  onChangeText={setReminderCustomerName}
+                  placeholder="e.g. Ramesh Kumar"
+                  autoCapitalize="words"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Customer WhatsApp Number</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 10, backgroundColor: Colors.white, overflow: 'hidden' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 12, paddingVertical: 14, borderRightWidth: 1, borderRightColor: Colors.border }}>
+                    <Text style={{ fontSize: 16 }}>🇮🇳</Text>
+                    <Text style={{ marginLeft: 4, fontWeight: 'bold', color: Colors.text, fontSize: 14 }}>+91</Text>
+                  </View>
+                  <TextInput
+                    style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: Colors.text }}
+                    value={reminderCustomerPhone}
+                    onChangeText={(t) => setReminderCustomerPhone(t.replace(/\D/g, '').slice(0, 10))}
+                    keyboardType="phone-pad"
+                    placeholder="9876543210"
+                    placeholderTextColor={Colors.textSecondary}
+                    maxLength={10}
+                  />
+                </View>
+                <Text style={{ fontSize: 10, color: Colors.textSecondary, marginTop: 4 }}>
+                  Enter 10-digit mobile number. +91 is added automatically.
+                </Text>
+              </View>
+
+
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Balance Amount Due (₹)</Text>
+                <TextInput 
+                  style={[styles.adminInput, { color: '#E53935', fontWeight: 'bold' }]}
+                  value={reminderBalance}
+                  onChangeText={setReminderBalance}
+                  keyboardType="numeric"
+                  placeholder="e.g. 30000"
+                />
+              </View>
+
+              {/* Send WhatsApp Reminder Button */}
+              <TouchableOpacity
+                style={{
+                  marginTop: 16,
+                  backgroundColor: '#25D366',
+                  borderRadius: 14,
+                  paddingVertical: 14,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  elevation: 3,
+                  shadowColor: '#25D366',
+                  shadowOpacity: 0.4,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                }}
+                onPress={() => {
+                  const rawPhone = reminderCustomerPhone.trim().replace(/\D/g, '');
+                  if (!rawPhone || rawPhone.length < 10) {
+                    Alert.alert('Invalid Number', 'Please enter a valid 10-digit WhatsApp number.');
+                    return;
+                  }
+                  if (!reminderBalance.trim()) {
+                    Alert.alert('Missing Info', 'Please enter the balance amount.');
+                    return;
+                  }
+
+                  // Always prepend Indian country code 91
+                  const phone = `91${rawPhone}`;
+
+                  const dueText = rBalanceDueDate ? `\n📅 *Due Date:* ${rBalanceDueDate}` : '';
+                  const gpayNum = rBusinessName === 'ANANTH CEMENT AND STEELS' ? '7094488447' : '8124488447';
+                  const customer = reminderCustomerName.trim() ? `*${reminderCustomerName.trim()}*` : '*Sir/Madam*';
+                  
+                  const message =
+                    `🔔 *Payment Reminder* 🔔\n\n` +
+                    `Hello ${customer} 👋\n\n` +
+                    `This is a gentle reminder regarding your pending payment.\n\n` +
+                    `💰 *Balance Due Amount:* ₹${reminderBalance.trim()}${dueText}\n\n` +
+                    `Kindly make the payment at your earliest convenience to avoid delays.\n\n` +
+                    `📲 *Google Pay:* ${gpayNum}\n\n` +
+                    `Thank you for your support 🙏\n\n` +
+                    `━━━━━━━━━━━━━━\n` +
+                    `🏢 *${rBusinessName || 'BUSINESS NAME'}*`;
+
+
+
+                  const url = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
+                  
+                  // Capture the Live Receipt Preview as an image
+                  captureRef(liveReceiptRef, {
+                    format: 'png',
+                    quality: 0.9,
+                  }).then((uri) => {
+                    // Send to WhatsApp using react-native-share
+                    Share.shareSingle({
+                      title: 'Payment Reminder',
+                      message: message,
+                      url: uri,
+                      social: Share.Social.WHATSAPP,
+                      whatsAppNumber: phone, // Android directly opens chat with this number
+                    }).catch((err) => {
+                      // Fallback if share fails (e.g., WhatsApp not installed)
+                      Linking.openURL(url).catch(() => {
+                        Alert.alert('Error', 'Could not open WhatsApp.');
+                      });
+                    });
+                  }).catch(() => {
+                    // Fallback to text only if image capture fails
+                    Linking.openURL(url).catch(() => {
+                      Alert.alert('Error', 'Could not open WhatsApp.');
+                    });
+                  });
+                }}
+              >
+                <Text style={{ fontSize: 20 }}>💬</Text>
+                <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 15 }}>Send WhatsApp Reminder</Text>
+              </TouchableOpacity>
+
+              {/* Quick Reminder Tip */}
+              <View style={{ marginTop: 14, backgroundColor: '#E8F5E9', borderRadius: 10, padding: 10 }}>
+                <Text style={{ fontSize: 11, color: '#1B5E20', lineHeight: 17 }}>
+                  💡 <Text style={{ fontWeight: 'bold' }}>Tip:</Text> The reminder message is pre-filled with the customer name, balance amount, and due date. WhatsApp will open with the message ready to send.
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : activeTab === 'Customers' ? (
+          <View style={styles.section}>
+            <Text style={[Typography.h3, styles.sectionTitle]}>Customer Management</Text>
+            
+            <View style={[styles.brandManageCard, { marginTop: 10 }]}>
+              <Text style={[styles.inputLabel, { fontSize: 16, marginBottom: 15, color: Colors.primary }]}>Create Regular Customer Account</Text>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Full Name</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={newCustomerName}
+                  onChangeText={setNewCustomerName}
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Phone Number (User ID)</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={newCustomerPhone}
+                  onChangeText={(t) => setNewCustomerPhone(t.replace(/\D/g, '').slice(0, 10))}
+                  keyboardType="phone-pad"
+                  placeholder="e.g. 9876543210"
+                  maxLength={10}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Password</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={newCustomerPassword}
+                  onChangeText={setNewCustomerPassword}
+                  placeholder="Enter password"
+                  secureTextEntry={true}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Address (Optional)</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={newCustomerAddress}
+                  onChangeText={setNewCustomerAddress}
+                  placeholder="Enter full address"
+                />
+              </View>
+
+              <TouchableOpacity 
+                style={[styles.saveProductBtn, { marginTop: 15 }]}
+                onPress={async () => {
+                  if (!newCustomerName || !newCustomerPhone || !newCustomerPassword) {
+                    Alert.alert('Missing Info', 'Please provide name, phone, and password.');
+                    return;
+                  }
+                  
+                  if (newCustomerPhone.length < 10) {
+                    Alert.alert('Invalid Phone', 'Phone number must be at least 10 digits.');
+                    return;
+                  }
+
+                  setLoading(true);
+                  try {
+                    await authService.adminCreateUser({
+                      name: newCustomerName.trim(),
+                      phone: newCustomerPhone.trim(),
+                      password: newCustomerPassword.trim(),
+                      address: newCustomerAddress.trim()
+                    });
+                    
+                    Alert.alert('Success', 'Customer account created successfully!');
+                    setNewCustomerName('');
+                    setNewCustomerPhone('');
+                    setNewCustomerPassword('');
+                    setNewCustomerAddress('');
+                  } catch (e: any) {
+                    Alert.alert('Error', e.message || 'Failed to create user.');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.saveProductText}>Create Customer Account</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : activeTab === 'Employees' ? (
+          <View style={styles.tabContent}>
+            <Text style={styles.sectionTitle}>Employee Management</Text>
+            
+            {/* Create New Employee */}
+            <View style={styles.brandManageCard}>
+              <Text style={[styles.inputLabel, { fontSize: 16, marginBottom: 15, color: Colors.primary }]}>
+                {editingEmployeeId ? 'Edit Employee Credential' : 'Create Employee Credential'}
+              </Text>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Employee ID / Mobile Number</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={newEmpMobile}
+                  onChangeText={setNewEmpMobile}
+                  placeholder="e.g. EMP001 or 9876543210"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Employee Password</Text>
+                <TextInput 
+                  style={styles.adminInput}
+                  value={newEmpPassword}
+                  onChangeText={setNewEmpPassword}
+                  placeholder="Password"
+                  secureTextEntry
+                />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity 
+                  style={[styles.saveProductBtn, { marginTop: 15, flex: 1, backgroundColor: editingEmployeeId ? Colors.accent : Colors.primary }]}
+                  onPress={async () => {
+                    if(!newEmpMobile.trim() || !newEmpPassword.trim()) {
+                      Alert.alert('Error', 'Please enter both ID/Mobile and Password');
+                      return;
+                    }
+                    if (editingEmployeeId) {
+                      const success = await authService.updateEmployee(editingEmployeeId, { mobile: newEmpMobile.trim(), password: newEmpPassword.trim() });
+                      if(success) {
+                        Alert.alert('Success', 'Employee updated successfully');
+                        setNewEmpMobile('');
+                        setNewEmpPassword('');
+                        setEditingEmployeeId(null);
+                      } else {
+                        Alert.alert('Error', 'Could not update employee');
+                      }
+                    } else {
+                      const success = await authService.addEmployee({ mobile: newEmpMobile.trim(), password: newEmpPassword.trim() });
+                      if(success) {
+                        Alert.alert('Success', 'Employee created successfully');
+                        setNewEmpMobile('');
+                        setNewEmpPassword('');
+                      } else {
+                        Alert.alert('Error', 'Could not create employee');
+                      }
+                    }
+                  }}
+                >
+                  <Text style={styles.saveProductText}>{editingEmployeeId ? 'Update Employee' : 'Create Employee'}</Text>
+                </TouchableOpacity>
+
+                {editingEmployeeId && (
+                  <TouchableOpacity 
+                    style={[styles.saveProductBtn, { marginTop: 15, backgroundColor: Colors.error }]}
+                    onPress={() => {
+                      setEditingEmployeeId(null);
+                      setNewEmpMobile('');
+                      setNewEmpPassword('');
+                    }}
+                  >
+                    <Text style={styles.saveProductText}>Cancel</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* List Employees */}
+            <Text style={[styles.sectionTitle, { marginTop: 25 }]}>Registered Employees</Text>
+            {localEmployees.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No employees registered yet.</Text>
+              </View>
+            ) : (
+              localEmployees.map((emp: any) => (
+                <View key={emp.id} style={styles.customerCard}>
+                  <View style={styles.customerInfo}>
+                    <Text style={styles.customerName}>ID / Mobile: {emp.mobile}</Text>
+                    <Text style={styles.customerPhone}>Password: {emp.password}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity 
+                      style={[styles.deleteBtn, { backgroundColor: '#E3F2FD' }]}
+                      onPress={() => {
+                        setEditingEmployeeId(emp.id);
+                        setNewEmpMobile(emp.mobile);
+                        setNewEmpPassword(emp.password);
+                      }}
+                    >
+                      <Text style={{ fontSize: 16 }}>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.deleteBtn}
+                      onPress={() => {
+                        Alert.alert('Delete Employee', `Are you sure you want to delete ${emp.mobile}?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: () => authService.deleteEmployee(emp.id) }
+                        ]);
+                      }}
+                    >
+                      <Trash2 size={20} color={Colors.error} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
             )}
           </View>
         ) : activeTab === 'Settings' ? (
@@ -1362,28 +2337,31 @@ const styles = StyleSheet.create({
   filterBtnTextActive: {
     color: Colors.white,
   },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: Colors.surface,
-    padding: 2,
-    marginHorizontal: 20,
+  tabBarContainer: {
     marginVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  },
+  tabBarContent: {
+    paddingHorizontal: 20,
+    gap: 10,
   },
   tab: {
-    flex: 1,
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: Colors.surface,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
   },
   activeTab: {
     backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   tabText: {
     color: Colors.textSecondary,
     fontWeight: '600',
+    fontSize: 14,
   },
   activeTabText: {
     color: Colors.white,
@@ -2161,6 +3139,169 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 13,
     fontWeight: '600',
+  },
+  mockReceiptContainer: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 4,
+    marginVertical: 10,
+    overflow: 'hidden',
+  },
+  mockTearOff: {
+    height: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    borderStyle: 'dotted',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  mockReceiptContent: {
+    padding: 20,
+  },
+  mockReceiptTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  mockReceiptTagline: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  mockReceiptDivider: {
+    height: 1,
+    borderColor: '#E0E0E0',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    marginVertical: 12,
+  },
+  mockReceiptDetails: {
+    gap: 4,
+  },
+  mockReceiptDetailText: {
+    fontSize: 12,
+    color: '#444',
+  },
+  mockItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 4,
+  },
+  mockItemName: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+    flex: 1,
+  },
+  mockItemQty: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  mockTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  mockTotalLabel: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  mockTotalVal: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  mockTermsText: {
+    fontSize: 11,
+    color: '#777',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 10,
+  },
+  mockFooterBranding: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  toggleLabel: {
+    fontSize: 14,
+    color: Colors.text,
+    fontWeight: '500',
+  },
+  switchTrack: {
+    width: 50,
+    height: 28,
+    borderRadius: 14,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  switchTrackActive: {
+    backgroundColor: Colors.success,
+  },
+  switchTrackInactive: {
+    backgroundColor: '#D1D1D6',
+  },
+  switchThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  switchThumbActive: {
+    transform: [{ translateX: 22 }],
+  },
+  switchThumbInactive: {
+    transform: [{ translateX: 0 }],
+  },
+  colorPickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 10,
+  },
+  colorSwatch: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorSwatchActive: {
+    borderColor: '#FFFFFF',
+    transform: [{ scale: 1.1 }],
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
   },
 });
 

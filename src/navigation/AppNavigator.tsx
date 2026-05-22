@@ -21,6 +21,7 @@ import LaundryStoneScreen from '../screens/LaundryStoneScreen';
 import BlueMetalScreen from '../screens/BlueMetalScreen';
 import TokensScreen from '../screens/TokensScreen';
 import NewArrivalsScreen from '../screens/NewArrivalsScreen';
+import PartySelectionScreen from '../screens/PartySelectionScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -28,7 +29,7 @@ const AppNavigator = () => {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Login"
+        initialRouteName="Splash"
         screenOptions={{
           headerShown: false,
           animation: 'fade_from_bottom',
@@ -54,6 +55,11 @@ const AppNavigator = () => {
         <Stack.Screen name="Blue Metal" component={BlueMetalScreen} />
         <Stack.Screen name="Tokens" component={TokensScreen} />
         <Stack.Screen name="NewArrivals" component={NewArrivalsScreen} />
+        <Stack.Screen 
+          name="PartySelection" 
+          component={PartySelectionScreen} 
+          options={{ presentation: 'transparentModal', animation: 'fade' }} 
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

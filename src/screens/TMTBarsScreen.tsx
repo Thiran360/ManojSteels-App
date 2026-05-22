@@ -146,16 +146,17 @@ const TMTBarsScreen = ({ navigation }: any) => {
             <TouchableOpacity 
               style={styles.bulkAddBtn} 
               onPress={() => {
-                selectedEntries.forEach(([size, qty]) => {
+                const itemsToAdd = selectedEntries.map(([size, qty]) => {
                   const itemWithSize = { 
                     ...item, 
                     id: `${item.id}-${size}`, 
                     name: `${item.name} (${size}MM)` 
                   };
-                  cartService.addItem(itemWithSize, qty);
+                  return { item: itemWithSize, qty };
                 });
+                
                 setSizeSelections({});
-                Alert.alert('Success', 'All selected sizes added to cart.');
+                navigation.navigate('PartySelection', { items: itemsToAdd });
               }}
             >
               <ShoppingCart size={18} color={Colors.white} />

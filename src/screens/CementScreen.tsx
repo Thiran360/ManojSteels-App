@@ -14,6 +14,7 @@ import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
 import { ChevronLeft, Search, Filter, ShoppingCart, Plus, Minus, Trash2 } from 'lucide-react-native';
 import { cartService } from '../services/CartService';
+// import ActivePartyBanner from '../components/ActivePartyBanner';
 
 const cementProducts: any[] = [];
 
@@ -96,7 +97,12 @@ const CementScreen = ({ navigation }: any) => {
                 <Plus size={16} color={Colors.text} />
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.addBtn} onPress={() => cartService.addItem(item, qty)}>
+            <TouchableOpacity 
+              style={styles.addBtn} 
+              onPress={() => {
+                navigation.navigate('PartySelection', { item, qty });
+              }}
+            >
               <ShoppingCart size={18} color={Colors.white} />
               <Text style={styles.addBtnText}>Add</Text>
             </TouchableOpacity>

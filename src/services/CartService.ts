@@ -9,6 +9,8 @@ class CartService {
   private tokenCounter: number = 101; // Starting token for bulk
   private loyaltyTokens: number = 2800;
   private brands: string[] = ['UltraTech Cement', 'Ambuja Cement', 'Ramco Cement', 'Chettinad Cement'];
+  private activeParty: { name: string; phone: string } | null = null;
+  private customParties: { name: string; phone: string }[] = [];
   private listeners: (() => void)[] = [];
 
   constructor() {
@@ -32,12 +34,27 @@ class CartService {
       if (savedProducts) this.products = JSON.parse(savedProducts);
       if (savedTokens) this.loyaltyTokens = parseInt(savedTokens);
       if (savedCounter) this.tokenCounter = parseInt(savedCounter);
-      
+
       const savedCart = await AsyncStorage.getItem('@ms_cart');
-      if (savedCart) this.cartItems = JSON.parse(savedCart);
-      
+      if (savedCart) {
+        let parsedCart = JSON.parse(savedCart);
+        // Clean up legacy 'Walk-in Customer' items
+        parsedCart = parsedCart.filter((item: any) => item.partyName !== 'Walk-in Customer');
+        this.cartItems = parsedCart;
+      }
+
+      const savedActiveParty = await AsyncStorage.getItem('@ms_active_party');
+      if (savedActiveParty) this.activeParty = JSON.parse(savedActiveParty);
+
+      const savedCustomParties = await AsyncStorage.getItem('@ms_custom_parties');
+      if (savedCustomParties) {
+        let parsedCustomParties = JSON.parse(savedCustomParties);
+        parsedCustomParties = parsedCustomParties.filter((p: any) => p.name !== 'Walk-in Customer');
+        this.customParties = parsedCustomParties;
+      }
+
       if (savedOrders) this.orders = JSON.parse(savedOrders);
-      
+
       if (savedBulkOrders) this.bulkOrders = JSON.parse(savedBulkOrders);
 
       this.notify();
@@ -53,6 +70,12 @@ class CartService {
       await AsyncStorage.setItem('@ms_tokens', this.loyaltyTokens.toString());
       await AsyncStorage.setItem('@ms_counter', this.tokenCounter.toString());
       await AsyncStorage.setItem('@ms_cart', JSON.stringify(this.cartItems));
+      if (this.activeParty) {
+        await AsyncStorage.setItem('@ms_active_party', JSON.stringify(this.activeParty));
+      } else {
+        await AsyncStorage.removeItem('@ms_active_party');
+      }
+      await AsyncStorage.setItem('@ms_custom_parties', JSON.stringify(this.customParties));
       await AsyncStorage.setItem('@ms_orders', JSON.stringify(this.orders));
       await AsyncStorage.setItem('@ms_bulk_orders', JSON.stringify(this.bulkOrders));
     } catch (e) {
@@ -63,6 +86,12 @@ class CartService {
   getCartItems() { return this.cartItems; }
   getOrders() { return this.orders; }
   getProducts() { return this.products; }
+  getActiveParty() { return this.activeParty; }
+  async setActiveParty(party: { name: string; phone: string } | null) {
+    this.activeParty = party;
+    await this.saveData();
+    this.notify();
+  }
   getLoyaltyTokens() { return this.loyaltyTokens; }
   getBulkOrders() { return this.bulkOrders; }
   getBrands() { return this.brands; }
@@ -93,10 +122,10 @@ class CartService {
 
   async apiFetchProducts(categoryId?: string) {
     try {
-      let url = 'https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/products/';
+      let url = 'https://api.codingboss.in/inventory/products/';
 
       if (categoryId) {
-        url = `https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/categories/${categoryId}/products/`;
+        url = `https://api.codingboss.in/inventory/categories/${categoryId}/products/`;
       }
 
       const response = await fetch(url, {
@@ -152,7 +181,7 @@ class CartService {
       formData.append('brand_name', productData.brand || 'Generic');
       formData.append('price', String(productData.price));
       formData.append('stock_quantity', String(productData.qty));
-      
+
       // If category is a name, try to fetch or resolve to ID, or let backend handle if it supports name
       formData.append('category', String(productData.category));
 
@@ -167,7 +196,7 @@ class CartService {
         } as any);
       }
 
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/products/', {
+      const response = await fetch('https://api.codingboss.in/inventory/products/', {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
@@ -198,7 +227,7 @@ class CartService {
 
   async deleteProduct(id: string) {
     try {
-      const response = await fetch(`https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/products/${id}/`, {
+      const response = await fetch(`https://api.codingboss.in/inventory/products/${id}/`, {
         method: 'DELETE',
         headers: {
           'Accept': 'application/json',
@@ -239,7 +268,7 @@ class CartService {
 
   async apiFetchBulkOrders() {
     try {
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/bulk-orders/', {
+      const response = await fetch('https://api.codingboss.in/inventory/bulk-orders/', {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -253,7 +282,9 @@ class CartService {
 
       const result = await response.json();
       this.bulkOrders = result.map((item: any) => ({
-        id: item.token_number || `BT-${item.id}`,
+        id: item.token_number || `MS-${String(item.id).padStart(3, '0')}`,
+        name: item.customer_name || 'Customer',
+        phone: item.customer_phone || item.phone || '',
         brand: item.category_name || item.cement_brand || 'Cement',
         bags: item.number_of_bags,
         location: item.delivery_address,
@@ -274,7 +305,7 @@ class CartService {
 
   async apiFetchActiveTokens() {
     try {
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/orders/active-tokens/', {
+      const response = await fetch('https://api.codingboss.in/inventory/orders/active-tokens/', {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -289,8 +320,10 @@ class CartService {
       const result = await response.json();
       // Map API fields to UI fields
       const mappedTokens = result.map((item: any) => ({
-        id: item.token_number || `TOKEN-${item.id}`,
-        brand: item.cement_brand || 'Cement',
+        id: item.token_number || `MS-${String(item.id).padStart(3, '0')}`,
+        name: item.customer_name || 'Customer',
+        phone: item.customer_phone || item.phone || '',
+        brand: item.category_name || item.cement_brand || 'Cement',
         bags: item.number_of_bags || 0,
         location: item.delivery_address || 'N/A',
         deliveryDate: item.preferred_delivery_date || 'N/A',
@@ -318,18 +351,19 @@ class CartService {
         'Online Payment': 'online',
         'Shop Credit': 'credit'
       };
-      
+
       const payload = {
         category: orderData.categoryId || 1,
         customer_name: orderData.customerName || 'Customer',
+        customer_phone: orderData.phone || '',
         number_of_bags: orderData.bags || 50,
         delivery_address: orderData.location || 'Coimbatore',
         truck_number: orderData.truckNo || '',
         delivery_date: orderData.deliveryDate || new Date().toISOString().split('T')[0],
-        payment_type: paymentMapping[orderData.paymentType] || 'cash',
+        payment_type: paymentMapping[orderData.paymentType] || orderData.transactionType?.toLowerCase() || 'cash',
       };
 
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/bulk-orders/', {
+      const response = await fetch('https://api.codingboss.in/inventory/bulk-orders/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -356,12 +390,12 @@ class CartService {
 
   async addItem(item: any, qty: number) {
     if (!item) return;
-    
+
     try {
       const user = authService.getCurrentUser();
       const productIdStr = String(item.id || '');
       const productId = parseInt(productIdStr.split('-')[0]); // Handle TMT size IDs (e.g. "1-8" -> 1)
-      
+
       if (!isNaN(productId)) {
         const payload = {
           employee: user?.id ? parseInt(user.id) : 1,
@@ -369,7 +403,7 @@ class CartService {
           quantity: qty
         };
 
-        const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/cart/', {
+        const response = await fetch('https://api.codingboss.in/inventory/cart/', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -390,12 +424,78 @@ class CartService {
     }
 
     const itemId = item.id || `temp-${Date.now()}`;
-    const existing = this.cartItems.find(i => String(i.id) === String(itemId));
-    
+    const partyName = this.activeParty ? this.activeParty.name : 'Unknown Party';
+    const partyPhone = this.activeParty ? this.activeParty.phone : '';
+    const scopedId = this.activeParty ? `${partyName}-${partyPhone}-${itemId}` : `anonymous-${itemId}`;
+
+    const existing = this.cartItems.find(i => String(i.id) === String(scopedId));
+
     if (existing) {
       existing.qty += qty;
     } else {
-      this.cartItems.push({ ...item, id: itemId, qty });
+      this.cartItems.push({
+        ...item,
+        id: scopedId,
+        originalId: itemId,
+        qty,
+        partyName,
+        partyPhone
+      });
+    }
+    this.notify();
+  }
+
+  async addItemForParty(item: any, qty: number, partyName: string, partyPhone: string) {
+    if (!item) return;
+
+    try {
+      const user = authService.getCurrentUser();
+      const productIdStr = String(item.id || '');
+      const productId = parseInt(productIdStr.split('-')[0]);
+
+      if (!isNaN(productId)) {
+        const payload = {
+          employee: user?.id ? parseInt(user.id) : 1,
+          product: productId,
+          quantity: qty
+        };
+
+        const response = await fetch('https://api.codingboss.in/inventory/cart/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          console.warn('Backend cart sync failed, but adding locally. Status:', response.status);
+        }
+      } else {
+        console.warn('Non-numeric product ID detected, adding locally only:', item.id);
+      }
+    } catch (e) {
+      console.log('API Add To Cart Error:', e);
+    }
+
+    const itemId = item.id || `temp-${Date.now()}`;
+    const scopedId = `${partyName}-${partyPhone}-${itemId}`;
+
+    const existing = this.cartItems.find(i => String(i.id) === String(scopedId));
+
+    if (existing) {
+      existing.qty += qty;
+    } else {
+      this.cartItems.push({
+        ...item,
+        id: scopedId,
+        originalId: itemId,
+        qty,
+        partyName,
+        partyPhone
+      });
     }
     this.notify();
   }
@@ -424,7 +524,7 @@ class CartService {
     phone: string,
     truckNo?: string
   }) {
-    const tokenNumber = `BT-${this.tokenCounter}`;
+    const tokenNumber = `MS-${String(this.tokenCounter).padStart(3, '0')}`;
     const newBulkOrder = {
       id: tokenNumber,
       ...details,
@@ -447,7 +547,7 @@ class CartService {
       const user = authService.getCurrentUser();
       const employeeId = user?.id ? parseInt(user.id) : 1;
 
-      const response = await fetch(`https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/cart/employee/${employeeId}/`, {
+      const response = await fetch(`https://api.codingboss.in/inventory/cart/employee/${employeeId}/`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -460,19 +560,29 @@ class CartService {
       }
 
       const result = await response.json();
-      
+
       const cartArray = Array.isArray(result) ? result : (result.value || result.data || []);
 
       const mappedCart = cartArray.map((cartItem: any) => {
         const productDetails = this.products.find(p => p.id === String(cartItem.product));
+        
+        // Preserve local party information if it exists
+        const existingLocal = this.cartItems.find(c => 
+          c.cartItemId === cartItem.id || 
+          (String(c.originalId || c.id) === String(cartItem.product))
+        );
+
         return {
           ...(productDetails || { price: 0, image: '', brand: 'Generic' }),
-          id: String(cartItem.product),
+          id: existingLocal ? existingLocal.id : String(cartItem.product),
+          originalId: String(cartItem.product),
           cartItemId: cartItem.id,
           name: cartItem.product_name || productDetails?.name || 'Unknown Product',
           qty: cartItem.quantity || 1,
           category: cartItem.category_name || productDetails?.category || 'Others',
-          categoryId: productDetails?.categoryId || 1
+          categoryId: productDetails?.categoryId || 1,
+          partyName: existingLocal?.partyName || 'Unknown Party',
+          partyPhone: existingLocal?.partyPhone || ''
         };
       });
 
@@ -501,7 +611,7 @@ class CartService {
       console.log('Global Refresh Started...');
 
       // 1. Fetch Refresh Endpoint
-      const refreshResponse = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/refresh/', {
+      await fetch('https://api.codingboss.in/inventory/refresh/', {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -529,7 +639,7 @@ class CartService {
     }
   }
 
-  updateBulkOrder(id: string, updates: Partial<{ status: string, truckNo: string }>) {
+  updateBulkOrder(id: string, updates: Partial<{ status: string, truckNo: string, bags: number, location: string, deliveryDate: string, paymentType: string, brand: string, name: string, phone: string }>) {
     this.bulkOrders = this.bulkOrders.map(order =>
       order.id === id ? { ...order, ...updates } : order
     );
@@ -562,7 +672,7 @@ class CartService {
           // Also handle IDs with suffixes like "1-8" -> 1
           const baseIdStr = String(item.id || '').split('-')[0];
           let realId = !isNaN(parseInt(baseIdStr)) ? parseInt(baseIdStr) : null;
-          
+
           if (!realId) {
             const match = this.products.find(p => p.name.toLowerCase() === item.name.toLowerCase());
             if (match) realId = parseInt(match.id);
@@ -577,7 +687,7 @@ class CartService {
         })
       };
 
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/orders/', {
+      const response = await fetch('https://api.codingboss.in/inventory/orders/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -593,9 +703,24 @@ class CartService {
       }
 
       const result = await response.json();
-      
-      this.clearCart();
-      return result; 
+
+      if (orderData.items && orderData.items.length > 0) {
+        const checkedOutIds = orderData.items.map((i: any) => i.id);
+        this.cartItems = this.cartItems.filter(item => !checkedOutIds.includes(item.id));
+        
+        // Also remove from customParties if they no longer have any items left in cart
+        const remainingForParty = this.cartItems.some(i => i.partyName === orderData.name && i.partyPhone === orderData.phone);
+        if (!remainingForParty) {
+          this.customParties = this.customParties.filter(
+            p => !(p.name === orderData.name && p.phone === orderData.phone)
+          );
+        }
+        
+        this.notify();
+      } else {
+        this.clearCartForParty(orderData.name, orderData.phone);
+      }
+      return result;
     } catch (e) {
       console.log('API Place Order Error:', e);
       throw e;
@@ -607,11 +732,11 @@ class CartService {
       const user = authService.getCurrentUser();
       const employeeId = user?.id ? parseInt(user.id) : 1;
 
-      const response = await fetch(`https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/orders/employee/${employeeId}/`, {
+      const response = await fetch(`https://api.codingboss.in/inventory/orders/employee/${employeeId}/`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true', 
+          'ngrok-skip-browser-warning': 'true',
         },
       });
 
@@ -621,7 +746,7 @@ class CartService {
 
       const result = await response.json();
       const orderArray = Array.isArray(result) ? result : (result.value || result.data || []);
-      
+
       const mappedOrders = orderArray.map((item: any) => ({
         id: item.id || item.order_id,
         name: item.customer_name,
@@ -646,7 +771,7 @@ class CartService {
 
   async apiFetchQuotations(status?: string) {
     try {
-      let url = 'https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/orders/';
+      let url = 'https://api.codingboss.in/inventory/orders/';
       if (status) url += `?status=${status}`;
 
       const response = await fetch(url, {
@@ -660,9 +785,9 @@ class CartService {
       if (!response.ok) throw new Error('Failed to fetch quotations');
 
       const result = await response.json();
-      
+
       const ordersData = result.value || result || [];
-      
+
       // Map API result to internal orders state
       this.orders = ordersData.map((item: any) => ({
         id: item.id,
@@ -678,7 +803,7 @@ class CartService {
         items: (item.items || []).map((i: any) => {
           // Try to find name from local products or static registry if missing
           let resolvedName = i.product_name;
-          const staticRegistry: {[key: string]: string} = {
+          const staticRegistry: { [key: string]: string } = {
             'c1': 'Ultratech Super Cement',
             'c2': 'Ambuja Cement',
             'c3': 'Ramco Super Grade Cement',
@@ -710,13 +835,13 @@ class CartService {
               // Check static registry (handle potential size suffix like t1-8)
               const baseId = String(i.product).split('-')[0];
               const suffix = String(i.product).split('-')[1];
-              
+
               if (staticRegistry[baseId]) {
                 resolvedName = suffix ? `${staticRegistry[baseId]} (${suffix}MM)` : staticRegistry[baseId];
               }
             }
           }
-          
+
           return {
             id: i.id, // Unique OrderItem ID
             productId: i.product || i.product_id,
@@ -738,7 +863,7 @@ class CartService {
   async apiFixPrice(id: string, updates: any[]) {
     try {
       console.log('Fixing prices for order:', id, 'Updates:', updates);
-      const response = await fetch(`https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/orders/${id}/fix_price/`, {
+      const response = await fetch(`https://api.codingboss.in/inventory/orders/${id}/fix_price/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -765,7 +890,7 @@ class CartService {
 
   async apiFetchBill(id: string) {
     try {
-      const response = await fetch(`https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/orders/admin/orders/${id}/bill/`, {
+      const response = await fetch(`https://api.codingboss.in/inventory/orders/admin/orders/${id}/bill/`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -813,9 +938,50 @@ class CartService {
     this.notify();
   }
 
+  clearCartForParty(partyName: string, partyPhone: string) {
+    this.cartItems = this.cartItems.filter(
+      item => !(item.partyName === partyName && item.partyPhone === partyPhone)
+    );
+    this.customParties = this.customParties.filter(
+      p => !(p.name === partyName && p.phone === partyPhone)
+    );
+    this.notify();
+  }
+
+  getParties() {
+    const unique = new Map<string, { name: string; phone: string }>();
+    
+    // First, add all parties that currently have items in the cart
+    this.cartItems.forEach(item => {
+      const pName = item.partyName || 'Unknown Party';
+      const pPhone = item.partyPhone || '';
+      const key = `${pName}-${pPhone}`;
+      unique.set(key, { name: pName, phone: pPhone });
+    });
+
+    // Second, add any custom empty parties created by the user
+    this.customParties.forEach(p => {
+      const key = `${p.name}-${p.phone}`;
+      if (!unique.has(key)) {
+        unique.set(key, p);
+      }
+    });
+
+    return Array.from(unique.values());
+  }
+
+  async addCustomParty(party: { name: string; phone: string }) {
+    const exists = this.customParties.some(p => p.name.toLowerCase() === party.name.toLowerCase() && p.phone === party.phone);
+    if (!exists) {
+      this.customParties.push(party);
+      await this.saveData();
+      this.notify();
+    }
+  }
+
   async apiFetchEmployees() {
     try {
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/employees/', {
+      const response = await fetch('https://api.codingboss.in/inventory/employees/', {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -834,7 +1000,7 @@ class CartService {
     try {
 
       const response = await fetch(
-        'https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/categories/',
+        'https://api.codingboss.in/inventory/categories/',
         {
           method: 'GET',
           headers: {

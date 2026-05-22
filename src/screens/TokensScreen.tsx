@@ -26,7 +26,9 @@ import {
   CheckCircle2,
   Package,
   Navigation,
-  ChevronRight
+  ChevronRight,
+  User,
+  Phone
 } from 'lucide-react-native';
 import { cartService } from '../services/CartService';
 import { authService } from '../services/AuthService';
@@ -38,9 +40,6 @@ const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const TokensScreen = ({ navigation }: any) => {
-  const [activeTab, setActiveTab] = useState<'tokens' | 'order'>('tokens');
-  const [bulkOrders, setBulkOrders] = useState(cartService.getBulkOrders());
-  const [balance, setBalance] = useState(cartService.getLoyaltyTokens());
   const [refreshing, setRefreshing] = useState(false);
 
   const onRefresh = React.useCallback(async () => {
@@ -58,30 +57,37 @@ const TokensScreen = ({ navigation }: any) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [paymentType, setPaymentType] = useState(paymentTypes[0]);
   const [truckNo, setTruckNo] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [transactionType, setTransactionType] = useState('Cash');
 
   // Calendar State
   const [viewDate, setViewDate] = useState(new Date());
 
   useEffect(() => {
     const update = () => {
-      setBulkOrders(cartService.getBulkOrders());
-      setBalance(cartService.getLoyaltyTokens());
+      // Refresh logic if needed
     };
     cartService.on('change', update);
     
     // Initial fetch from API
     cartService.apiFetchActiveTokens();
     cartService.apiFetchCategories().then((cats: any[]) => {
-      setCategories(cats);
-      if (cats.length > 0) setSelectedCategory(cats[0]);
+      const cementCats = cats.filter(c => c.name.toLowerCase().includes('cement'));
+      setCategories(cementCats);
+      if (cementCats.length > 0) setSelectedCategory(cementCats[0]);
     }).catch(e => console.error(e));
     
     return () => cartService.off('change', update);
   }, []);
 
   const handlePlaceBulkOrder = async () => {
-    if (!bags || !location) {
-      Alert.alert('Missing Info', 'Please fill in all delivery details.');
+    if (!bags || !customerName) {
+      Alert.alert('Missing Info', 'Please fill in Name and Bags.');
+      return;
+    }
+    if (transactionType === 'Credit' && (!location || !phone)) {
+      Alert.alert('Missing Info', 'Please fill in Phone and Location for Credit orders.');
       return;
     }
 
@@ -93,20 +99,21 @@ const TokensScreen = ({ navigation }: any) => {
         categoryName: selectedCategory?.name || 'Cement',
         bags: parseInt(bags),
         location: location,
-        deliveryDate: deliveryDate.toISOString().split('T')[0], // Fixed parsing error
+        deliveryDate: deliveryDate.toISOString(), // Sent as full datetime
         paymentType: paymentType,
-        customerName: user?.username || 'Customer',
-        phone: user?.mobile_number || '9876543210',
-        truckNo: truckNo
+        customerName: customerName,
+        phone: phone,
+        truckNo: truckNo,
+        transactionType: transactionType
       };
 
       // Call the API
       const result = await cartService.apiPlaceBulkOrder(orderData);
 
       Alert.alert(
-        'Bulk Order Placed!',
-        `Your Token Number is ${result.id || 'Generated'}. Track your delivery status here.`,
-        [{ text: 'View Token', onPress: () => setActiveTab('tokens') }]
+        'Order Placed!',
+        `Your Order Number is ${result.id || 'Generated'}.`,
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
 
       setBags('');
@@ -151,7 +158,10 @@ const TokensScreen = ({ navigation }: any) => {
             isPast && styles.pastDay
           ]}
           onPress={() => {
-            setDeliveryDate(currentDay);
+            const newDate = new Date(currentDay);
+            const now = new Date();
+            newDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+            setDeliveryDate(newDate);
             setShowDatePicker(false);
           }}
         >
@@ -180,26 +190,13 @@ const TokensScreen = ({ navigation }: any) => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <ChevronLeft size={24} color={Colors.white} />
         </TouchableOpacity>
-        <Text style={[Typography.h3, styles.headerTitle]}>Bulk Order System</Text>
+        <Text style={[Typography.h3, styles.headerTitle]}>New Order</Text>
         <TouchableOpacity style={styles.infoBtn}>
           <ShieldCheck size={24} color={Colors.white} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.tabBar}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'tokens' && styles.activeTab]}
-          onPress={() => setActiveTab('tokens')}
-        >
-          <Text style={[styles.tabText, activeTab === 'tokens' && styles.activeTabText]}>Active Tokens</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'order' && styles.activeTab]}
-          onPress={() => setActiveTab('order')}
-        >
-          <Text style={[styles.tabText, activeTab === 'order' && styles.activeTabText]}>New Bulk Order</Text>
-        </TouchableOpacity>
-      </View>
+
 
       <ScrollView 
         showsVerticalScrollIndicator={false} 
@@ -209,31 +206,70 @@ const TokensScreen = ({ navigation }: any) => {
         }
       >
         
-        {activeTab === 'order' ? (
           <View style={styles.formContainer}>
-            <Text style={styles.formTitle}>Skip the shop line - Order Bulk</Text>
+            <Text style={styles.formTitle}>Skip the shop line - Order</Text>
             
-            <Text style={styles.inputLabel}>Select Category</Text>
-            <View style={styles.brandPicker}>
-              {categories.map(cat => (
+            <View style={styles.typeSelectorContainer}>
+              {['Cash', 'Credit'].map(type => (
                 <TouchableOpacity 
-                  key={cat.id} 
-                  style={[styles.brandOption, selectedCategory?.id === cat.id && styles.selectedBrand]}
-                  onPress={() => setSelectedCategory(cat)}
+                  key={type} 
+                  style={[styles.typeOption, transactionType === type && styles.selectedTypeOption]}
+                  onPress={() => setTransactionType(type)}
                 >
-                  <Text style={[styles.brandOptionText, selectedCategory?.id === cat.id && styles.selectedBrandText]}>
-                    {cat.name}
-                  </Text>
+                  <Coins size={18} color={transactionType === type ? Colors.white : Colors.textSecondary} />
+                  <Text style={[styles.typeOptionText, transactionType === type && styles.selectedTypeOptionText]}>{type}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Number of Bags</Text>
+              <Text style={styles.inputLabel}>Party Name</Text>
+              <View style={styles.inputWrapper}>
+                <User size={20} color={Colors.primary} style={styles.inputIcon} />
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Enter full name" 
+                  placeholderTextColor={Colors.textSecondary}
+                  value={customerName}
+                  onChangeText={setCustomerName}
+                  autoCapitalize="words"
+                />
+              </View>
+            </View>
+
+            {transactionType === 'Credit' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Phone Number</Text>
+                <View style={styles.inputWrapper}>
+                  <Phone size={20} color={Colors.primary} style={styles.inputIcon} />
+                  <TextInput 
+                    style={styles.input} 
+                    placeholder="Enter 10-digit number" 
+                    placeholderTextColor={Colors.textSecondary}
+                    keyboardType="phone-pad"
+                    value={phone}
+                    onChangeText={setPhone}
+                    maxLength={10}
+                  />
+                </View>
+              </View>
+            )}
+            
+            <Text style={styles.inputLabel}>Brand</Text>
+            <View style={styles.brandPicker}>
+              <View style={[styles.brandOption, styles.selectedBrand]}>
+                <Text style={[styles.brandOptionText, styles.selectedBrandText]}>
+                  Cement
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>No of Bags</Text>
               <View style={styles.inputWrapper}>
                 <TextInput 
                   style={styles.input} 
-                  placeholder="Minimum 50 bags" 
+                  placeholder="" 
                   placeholderTextColor={Colors.textSecondary}
                   keyboardType="numeric"
                   value={bags}
@@ -244,12 +280,12 @@ const TokensScreen = ({ navigation }: any) => {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Delivery Location</Text>
+              <Text style={styles.inputLabel}>Delivery Location {transactionType === 'Cash' ? '(Optional)' : ''}</Text>
               <View style={styles.inputWrapper}>
                 <MapPin size={20} color={Colors.primary} style={styles.inputIcon} />
                 <TextInput 
                   style={styles.input} 
-                  placeholder="Enter full address" 
+                  placeholder={transactionType === 'Cash' ? "Enter address (Optional)" : "Enter full address"} 
                   placeholderTextColor={Colors.textSecondary}
                   value={location}
                   onChangeText={setLocation}
@@ -273,102 +309,30 @@ const TokensScreen = ({ navigation }: any) => {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Preferred Delivery Date</Text>
+              <Text style={styles.inputLabel}>Date and Time</Text>
               <TouchableOpacity 
                 style={styles.inputWrapper} 
                 onPress={() => setShowDatePicker(true)}
               >
                 <Calendar size={20} color={Colors.primary} style={styles.inputIcon} />
                 <Text style={[styles.input, { textAlignVertical: 'center', paddingTop: 12 }]}>
-                  {deliveryDate.toDateString()}
+                  {deliveryDate.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </Text>
               </TouchableOpacity>
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Payment Type</Text>
-              <View style={styles.paymentPicker}>
-                {paymentTypes.map(p => (
-                  <TouchableOpacity 
-                    key={p} 
-                    style={[styles.paymentOption, paymentType === p && styles.selectedPayment]}
-                    onPress={() => setPaymentType(p)}
-                  >
-                    <CreditCard size={16} color={paymentType === p ? Colors.white : Colors.textSecondary} />
-                    <Text style={[styles.paymentText, paymentType === p && styles.selectedPaymentText]}>{p}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+
 
             <TouchableOpacity style={styles.submitBtn} onPress={handlePlaceBulkOrder}>
               <LinearGradient
                 colors={[Colors.primary, Colors.secondary]}
                 style={styles.submitGradient}
               >
-                <Text style={styles.submitBtnText}>Confirm Bulk Order & Get Token</Text>
+                <Text style={styles.submitBtnText}>Confirm Order</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
-        ) : (
-          <View style={styles.tokensContainer}>
-            <LinearGradient
-              colors={['#FFD700', '#FFA500']}
-              style={styles.miniBalance}
-            >
-              <View>
-                <Text style={styles.miniLabel}>Total Loyalty Tokens</Text>
-                <Text style={styles.miniValue}>{balance.toLocaleString()}</Text>
-              </View>
-              <Coins size={32} color={Colors.white} opacity={0.8} />
-            </LinearGradient>
 
-            <Text style={styles.sectionTitle}>Your Active Delivery Tokens</Text>
-
-            {bulkOrders.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Truck size={48} color={Colors.border} />
-                <Text style={styles.emptyText}>No active bulk tokens</Text>
-                <Text style={styles.emptySubtext}>Orders placed here skip the shop queue and include free site delivery.</Text>
-              </View>
-            ) : (
-              bulkOrders.map((order) => (
-                <View key={order.id} style={styles.tokenCard}>
-                  <View style={styles.tokenHeader}>
-                    <View>
-                      <Text style={styles.tokenNum}>{order.id}</Text>
-                      <Text style={styles.tokenTime}>{order.date}</Text>
-                    </View>
-                    <View style={styles.statusBadge}>
-                      <Text style={styles.statusText}>{order.status}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.tokenDetails}>
-                    <View style={styles.detailRow}>
-                      <Package size={16} color={Colors.textSecondary} />
-                      <Text style={styles.detailText}>{order.brand} • {order.bags} Bags</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <MapPin size={16} color={Colors.textSecondary} />
-                      <Text style={styles.detailText} numberOfLines={1}>{order.location}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Calendar size={16} color={Colors.textSecondary} />
-                      <Text style={styles.detailText}>Delivery: {order.deliveryDate}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Truck size={16} color={Colors.primary} />
-                      <Text style={[styles.detailText, { color: Colors.primary, fontWeight: 'bold' }]}>
-                        Truck No: {order.truckNo || 'Assigning...'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-        )}
 
         <View style={{ height: 50 }} />
       </ScrollView>
@@ -439,6 +403,12 @@ const styles = StyleSheet.create({
   submitBtn: { marginTop: 30, borderRadius: 15, overflow: 'hidden', elevation: 4 },
   submitGradient: { paddingVertical: 16, alignItems: 'center' },
   submitBtnText: { color: Colors.white, fontWeight: 'bold', fontSize: 16 },
+
+  typeSelectorContainer: { flexDirection: 'row', gap: 10, marginBottom: 10, marginTop: -5 },
+  typeOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F2F5', padding: 12, borderRadius: 12 },
+  selectedTypeOption: { backgroundColor: Colors.primary },
+  typeOptionText: { marginLeft: 8, fontSize: 14, color: Colors.textSecondary, fontWeight: 'bold' },
+  selectedTypeOptionText: { color: Colors.white },
 
   tokensContainer: { },
   miniBalance: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderRadius: 16, marginBottom: 25 },

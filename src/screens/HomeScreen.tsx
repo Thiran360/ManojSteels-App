@@ -15,6 +15,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
 import { cartService } from '../services/CartService';
+// import ActivePartyBanner from '../components/ActivePartyBanner';
 import Animated, { 
   FadeInDown, 
   FadeInRight, 
@@ -25,7 +26,6 @@ import Animated, {
   BounceInDown,
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
   withRepeat,
   withSequence,
   withTiming
@@ -34,7 +34,6 @@ import Animated, {
 import { 
   Search, 
   Bell, 
-  Menu, 
   ShoppingCart, 
   Package, 
   Layers, 
@@ -45,7 +44,6 @@ import {
   Waves, 
   Hexagon, 
   Droplet,
-  Coins,
   MoreHorizontal,
   Trash2
 } from 'lucide-react-native';
@@ -53,16 +51,16 @@ import {
 const { width } = Dimensions.get('window');
 
 const DEFAULT_CATEGORIES = [
-  { id: '1', name: 'Cement', icon: Package, color: '#1877F2' },
-  { id: '2', name: 'TMT Bars', icon: Layers, color: '#FF6B00' },
-  { id: '3', name: 'Kadapa Slabs', icon: Square, color: '#4CAF50' },
-  { id: '4', name: 'Building Blocks', icon: Grid, color: '#795548' },
-  { id: '5', name: 'Tarpaulin', icon: Tent, color: '#E91E63' },
-  { id: '6', name: 'Cement Products', icon: Wrench, color: '#607D8B' },
-  { id: '7', name: 'Laundry Stone', icon: Waves, color: '#00BCD4' },
-  { id: '8', name: 'Blue Metal', icon: Hexagon, color: '#673AB7' },
-  { id: '9', name: 'Water Tanks', icon: Droplet, color: '#03A9F4' },
-  { id: '10', name: 'Others', icon: MoreHorizontal, color: '#9E9E9E' },
+  { id: '1', name: 'Cement', image: require('../assets/cement_bags.png'), color: '#1877F2' },
+  { id: '2', name: 'TMT Bars', image: require('../assets/tmt_bars.png'), color: '#FF6B00' },
+  { id: '3', name: 'Kadapa Slabs', image: require('../assets/kadapa_slabs.png'), color: '#4CAF50' },
+  { id: '4', name: 'Building Blocks', image: require('../assets/building_blocks.png'), color: '#795548' },
+  { id: '5', name: 'Tarpaulin', image: require('../assets/tarpaulin.png'), color: '#E91E63' },
+  { id: '6', name: 'Cement Products', image: require('../assets/cement_products.png'), color: '#607D8B' },
+  { id: '7', name: 'Laundry Stone', image: require('../assets/laundry_stone.png'), color: '#00BCD4' },
+  { id: '8', name: 'Blue Metal', image: require('../assets/blue_metal.png'), color: '#673AB7' },
+  { id: '9', name: 'Water Tanks', image: require('../assets/water_tanks.png'), color: '#03A9F4' },
+  { id: '10', name: 'Others', image: require('../assets/others.png'), color: '#9E9E9E' },
 ];
 
 
@@ -117,7 +115,7 @@ const HomeScreen = ({ navigation }: any) => {
       -1,
       true
     );
-  }, []);
+  }, [floatingAnim]);
 
   const floatingStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: floatingAnim.value }]
@@ -142,9 +140,17 @@ const HomeScreen = ({ navigation }: any) => {
         >
           <Animated.View
             entering={ZoomIn.delay(index * 100 + 300).duration(600)}
-            style={[styles.categoryIconContainer, { backgroundColor: `${item.color}10` }]}
+            style={[
+              styles.categoryIconContainer, 
+              { backgroundColor: `${item.color}10`, overflow: 'hidden' },
+              item.image ? { width: 85, height: 85, borderRadius: 24, marginBottom: 6 } : {}
+            ]}
           >
-            <IconComponent size={28} color={item.color} strokeWidth={2.5} />
+            {item.image ? (
+              <Image source={typeof item.image === 'number' ? item.image : { uri: item.image }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
+            ) : (
+              <IconComponent size={28} color={item.color} strokeWidth={2.5} />
+            )}
           </Animated.View>
           <Text style={[Typography.bodySmall, styles.categoryName]}>{item.name}</Text>
         </TouchableOpacity>
@@ -198,7 +204,7 @@ const HomeScreen = ({ navigation }: any) => {
         <View style={styles.headerLeft}>
           <View style={styles.headerTitleContainer}>
             <Image 
-              source={require('../assets/logo.png')} 
+              source={require('../assets/navbar_logo.png')} 
               style={styles.headerLogo} 
               resizeMode="contain" 
             />
@@ -355,8 +361,8 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   headerLogo: {
-    width: width * 0.4,
-    height: 40,
+    width: width * 0.55,
+    height: 45,
   },
   headerRight: {
     flexDirection: 'row',

@@ -5,10 +5,27 @@ class AuthService {
   private currentUser: any = null;
   private listeners: (() => void)[] = [];
   private adminCredentials = { mobile: '0000', password: 'admin' };
+  private employees: any[] = [];
+  private receiptSettings = {
+    businessName: 'MANOJ STEELS',
+    tagline: 'B2B Building Materials Platform',
+    phone: '9876543210',
+    address: '123 Main Bazaar Road, Steel City',
+    gstin: '33AAAAA1111A1Z1',
+    terms: 'Goods once sold cannot be returned.',
+    footerBranding: '~ Manoj Steels ~',
+    showGstin: true,
+    showPaymentMethod: true,
+    accentColor: '#1877F2',
+    balanceDueDate: '',
+    whatsappNumber: '',
+  };
 
   private constructor() {
     this.loadAdminCredentials();
+    this.loadEmployeeCredentials();
     this.loadUserData();
+    this.loadReceiptSettings();
   }
 
   private async loadUserData() {
@@ -40,6 +57,44 @@ class AuthService {
     }
   }
 
+  private async loadEmployeeCredentials() {
+    try {
+      const saved = await AsyncStorage.getItem('employee_creds');
+      if (saved) {
+        this.employees = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.log('Failed to load employee creds:', e);
+    }
+  }
+
+  private async loadReceiptSettings() {
+    try {
+      const saved = await AsyncStorage.getItem('receipt_settings');
+      if (saved) {
+        this.receiptSettings = { ...this.receiptSettings, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.log('Failed to load receipt settings:', e);
+    }
+  }
+
+  public getReceiptSettings() {
+    return this.receiptSettings;
+  }
+
+  public async updateReceiptSettings(updated: any) {
+    try {
+      this.receiptSettings = { ...this.receiptSettings, ...updated };
+      await AsyncStorage.setItem('receipt_settings', JSON.stringify(this.receiptSettings));
+      this.notify();
+      return true;
+    } catch (e) {
+      console.log('Failed to save receipt settings:', e);
+      return false;
+    }
+  }
+
   public async updateAdminCredentials(mobile: string, password: string) {
     try {
       this.adminCredentials = { mobile, password };
@@ -54,6 +109,47 @@ class AuthService {
 
   public getAdminCredentials() {
     return this.adminCredentials;
+  }
+
+  public getEmployeeCredentials() {
+    return this.employees;
+  }
+
+  public async addEmployee(employeeData: any) {
+    try {
+      this.employees.push({ ...employeeData, id: Date.now().toString() });
+      await AsyncStorage.setItem('employee_creds', JSON.stringify(this.employees));
+      this.notify();
+      return true;
+    } catch (e) {
+      console.log('Failed to add employee:', e);
+      return false;
+    }
+  }
+
+  public async updateEmployee(id: string, updatedData: any) {
+    try {
+      this.employees = this.employees.map((emp: any) => 
+        emp.id === id ? { ...emp, ...updatedData } : emp
+      );
+      await AsyncStorage.setItem('employee_creds', JSON.stringify(this.employees));
+      this.notify();
+      return true;
+    } catch (e) {
+      console.log('Failed to update employee:', e);
+      return false;
+    }
+  }
+  
+  public async deleteEmployee(id: string) {
+    try {
+      this.employees = this.employees.filter((emp: any) => emp.id !== id);
+      await AsyncStorage.setItem('employee_creds', JSON.stringify(this.employees));
+      this.notify();
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   public static getInstance(): AuthService {
@@ -82,7 +178,7 @@ class AuthService {
   async signup(userData: any) {
     try {
       const response = await fetch(
-        'https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/signup/',
+        'https://api.codingboss.in/inventory/signup/',
         {
           method: 'POST',
           headers: {
@@ -153,6 +249,46 @@ class AuthService {
     }
   }
 
+  async adminCreateUser(userData: any) {
+    try {
+      const response = await fetch(
+        'https://api.codingboss.in/inventory/signup/',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+          body: JSON.stringify({
+            name: userData.name,
+            phone: userData.phone,
+            password: userData.password,
+            address: userData.address || '',
+          }),
+        }
+      );
+
+      let result;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || result?.detail || 'User creation failed');
+      }
+
+      return result;
+    } catch (e) {
+      console.log('Admin Create User Error:', e);
+      throw e;
+    }
+  }
+
   async login(phone: string, password: string) {
     try {
       const payload = {
@@ -163,7 +299,7 @@ class AuthService {
       console.log('Sending Login Payload:', payload);
 
       const response = await fetch(
-        'https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/login/',
+        'https://api.codingboss.in/inventory/login/',
         {
           method: 'POST',
           headers: {
@@ -229,7 +365,7 @@ class AuthService {
 
   async logout() {
     try {
-      await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/logout/', {
+      await fetch('https://api.codingboss.in/inventory/logout/', {
         method: 'POST',
         headers: {
           'Accept': 'application/json',
@@ -247,7 +383,7 @@ class AuthService {
   async apiFetchProfile() {
     try {
       console.log('Fetching profile from signup endpoint...');
-      const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/signup/', {
+      const response = await fetch('https://api.codingboss.in/inventory/signup/', {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -268,12 +404,12 @@ class AuthService {
         // If the endpoint returns a list of signed-up users, find the matching one
         const currentMobile = this.currentUser?.mobile_number || this.currentUser?.phone;
         const currentId = this.currentUser?.id;
-        
-        profileData = result.find((u: any) => 
+
+        profileData = result.find((u: any) =>
           (currentMobile && (u.phone === currentMobile || u.mobile_number === currentMobile || u.mobile === currentMobile)) ||
           (currentId && (String(u.id) === String(currentId) || String(u.employee_id) === String(currentId) || String(u.pk) === String(currentId)))
         );
-        
+
         // If no matching user, use the last signed up user or fallback
         if (!profileData && result.length > 0) {
           profileData = result[result.length - 1];
@@ -304,7 +440,7 @@ class AuthService {
       console.log('Signup profile fetch error, falling back to profile endpoint:', e);
       // Fallback to /profile/ endpoint
       try {
-        const response = await fetch('https://unlanded-isela-unmunificently.ngrok-free.dev/inventory/profile/', {
+        const response = await fetch('https://api.codingboss.in/inventory/profile/', {
           method: 'GET',
           headers: {
             'Accept': 'application/json',
