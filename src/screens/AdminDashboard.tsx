@@ -3297,7 +3297,7 @@ const AdminDashboard = ({ navigation }: any) => {
         {/* Payment Modal for Fuel */}
         <Modal visible={showFuelPaymentModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { height: '40%' }]}>
+            <View style={[styles.modalContent, { height: '40%' }]}>    
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Add Payment for {formatFuelMonth(fuelMonthFilter)}</Text>
                 <TouchableOpacity onPress={() => setShowFuelPaymentModal(false)}>
