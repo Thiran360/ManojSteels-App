@@ -3303,7 +3303,7 @@ const AdminDashboard = ({ navigation }: any) => {
                 <TouchableOpacity onPress={() => setShowFuelPaymentModal(false)}>
                   <X size={24} color={Colors.text} />
                 </TouchableOpacity>
-              </View>
+              </View>    
               <View style={{ padding: 20 }}>
                 <Text style={styles.inputLabel}>Amount (₹)</Text>
                 <TextInput placeholderTextColor={Colors.textSecondary}
