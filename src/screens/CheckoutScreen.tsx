@@ -24,6 +24,11 @@ const getProductUnit = (category?: string) => {
   return 'units';
 };
 
+const isBulkItem = (name: string) => {
+  const n = (name || '').toLowerCase();
+  return n.includes('cement');
+};
+
 const CheckoutScreen = ({ navigation, route }: any) => {
   const user = authService.getCurrentUser();
   const [customerName, setCustomerName] = useState(route?.params?.customerName || user?.full_name || user?.name || '');
@@ -67,24 +72,68 @@ const CheckoutScreen = ({ navigation, route }: any) => {
   const totalQty = cartItems.reduce((acc, item) => acc + (item.qty || 0), 0);
 
   const handlePlaceOrder = async () => {
+    executePlaceOrder(cartItems);
+  };
+
+  const executePlaceOrder = async (items: any[]) => {
     try {
-      console.log('Logged User:', user);
       const result = await cartService.apiPlaceOrder({
         name: customerName,
         phone: customerPhone,
         address: customerAddress,
         payment_type: paymentType,
         employee_id: user?.id,
-        items: [...cartItems],
+        items: items,
       });
       setPlacedOrder({
         id: result.data?.id || result.quotation_id || result.order_id || result.id || 'MS-Pending',
         employeeName: user?.full_name || user?.name || user?.username || 'Manoj Steels User',
       });
       setIsSuccess(true);
+      // Clear specific party from cart if needed
     } catch (e: any) {
       console.error(e);
-      Alert.alert('Error', e.message || 'Failed to place quotation. Please try again.');
+      Alert.alert('Error', e.message || 'Failed to place order. Please try again.');
+    }
+  };
+
+  const executeSplitOrder = async (tokenItems: any[], normalItems: any[]) => {
+    try {
+      for (const item of tokenItems) {
+        await cartService.apiPlaceBulkOrder({
+          categoryId: item.categoryId ? parseInt(item.categoryId) : 1,
+          customerName: customerName,
+          phone: customerPhone,
+          bags: item.qty,
+          location: customerAddress,
+          truckNo: '',
+          deliveryDate: new Date().toISOString().split('T')[0],
+          paymentType: paymentType,
+          transactionType: paymentType === 'cash' ? 'Cash' : 'Credit'
+        });
+      }
+
+      let resultId = 'Tokens Created';
+      if (normalItems.length > 0) {
+        const result = await cartService.apiPlaceOrder({
+          name: customerName,
+          phone: customerPhone,
+          address: customerAddress,
+          payment_type: paymentType,
+          employee_id: user?.id,
+          items: normalItems,
+        });
+        resultId = result.data?.id || result.quotation_id || result.order_id || result.id || 'MS-Pending';
+      }
+
+      setPlacedOrder({
+        id: resultId,
+        employeeName: user?.full_name || user?.name || user?.username || 'Manoj Steels User',
+      });
+      setIsSuccess(true);
+    } catch (e: any) {
+      console.error(e);
+      Alert.alert('Error', e.message || 'Failed to split orders.');
     }
   };
 

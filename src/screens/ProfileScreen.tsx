@@ -10,6 +10,8 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
@@ -28,6 +30,7 @@ import {
   Lock,
   X
 } from 'lucide-react-native';
+
 
 const ProfileScreen = ({ navigation }: any) => {
   const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
@@ -60,6 +63,7 @@ const ProfileScreen = ({ navigation }: any) => {
   const [adminMobile, setAdminMobile] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
+  const [showProfilePassword, setShowProfilePassword] = useState(false);
 
   const handleAdminLogin = async () => {
     if (!adminMobile || !adminPassword) {
@@ -88,7 +92,13 @@ const ProfileScreen = ({ navigation }: any) => {
     { 
       icon: <ShieldCheck size={22} color={Colors.accent} />, 
       label: 'Admin Panel', 
-      action: () => setAdminModalVisible(true) 
+      action: () => {
+        if (currentUser?.role === 'admin') {
+          navigation.navigate('Admin');
+        } else {
+          setAdminModalVisible(true);
+        }
+      } 
     },
     { icon: <HelpCircle size={22} color={Colors.accent} />, label: 'Help & Support', screen: null },
   ];
@@ -111,71 +121,50 @@ const ProfileScreen = ({ navigation }: any) => {
           </View>
           
           <View style={styles.infoContainer}>
+
+             {/* Full Name - always shown */}
              <View style={styles.infoRow}>
                <View style={styles.infoIconWrapper}>
                  <User size={18} color={Colors.accent} />
                </View>
                <View style={styles.infoTextContainer}>
-                 <Text style={styles.infoLabel}>Fullname</Text>
-                 <Text style={styles.infoValue}>{currentUser?.full_name || currentUser?.name || 'Manoj Steels User'}</Text>
+                 <Text style={styles.infoLabel}>Full Name</Text>
+                 <Text style={styles.infoValue}>
+                   {currentUser?.full_name || currentUser?.customer_name || currentUser?.name || '—'}
+                 </Text>
                </View>
              </View>
-             
+
+             {/* Mobile Number - always shown */}
              <View style={styles.infoRow}>
                <View style={styles.infoIconWrapper}>
                  <Phone size={18} color={Colors.accent} />
                </View>
                <View style={styles.infoTextContainer}>
                  <Text style={styles.infoLabel}>Mobile Number</Text>
-                 <Text style={styles.infoValue}>{currentUser?.mobile_number || currentUser?.phone || 'Not Available'}</Text>
+                 <Text style={styles.infoValue}>
+                   {currentUser?.mobile_number || currentUser?.customer_phone || currentUser?.phone || '—'}
+                 </Text>
                </View>
              </View>
-             
+
+             {/* Role - always shown */}
              <View style={styles.infoRow}>
                <View style={styles.infoIconWrapper}>
-                 <MapPin size={18} color={Colors.accent} />
+                 <ShieldCheck size={18} color={Colors.accent} />
                </View>
                <View style={styles.infoTextContainer}>
-                 <Text style={styles.infoLabel}>Business Address</Text>
-                 <Text style={styles.infoValue} numberOfLines={2}>{currentUser?.business_address || currentUser?.address || 'Address Not Set'}</Text>
+                 <Text style={styles.infoLabel}>Role</Text>
+                 <Text style={[styles.infoValue, { textTransform: 'capitalize' }]}>
+                   {currentUser?.role
+                     ? currentUser.role.toLowerCase() === 'user'
+                       ? 'Customer'
+                       : currentUser.role
+                     : 'Customer'}
+                 </Text>
                </View>
              </View>
 
-             {currentUser?.email && (
-               <View style={styles.infoRow}>
-                 <View style={styles.infoIconWrapper}>
-                   <User size={18} color={Colors.accent} />
-                 </View>
-                 <View style={styles.infoTextContainer}>
-                   <Text style={styles.infoLabel}>Email Address</Text>
-                   <Text style={styles.infoValue}>{currentUser.email}</Text>
-                 </View>
-               </View>
-             )}
-
-             {currentUser?.role && (
-               <View style={styles.infoRow}>
-                 <View style={styles.infoIconWrapper}>
-                   <ShieldCheck size={18} color={Colors.accent} />
-                 </View>
-                 <View style={styles.infoTextContainer}>
-                   <Text style={styles.infoLabel}>Role</Text>
-                   <Text style={[styles.infoValue, { textTransform: 'capitalize' }]}>{currentUser.role}</Text>
-                 </View>
-               </View>
-             )}
-
-             {currentUser?.date_joined && (
-               <View style={styles.infoRow}>
-                 <View style={styles.infoIconWrapper}>
-                   <HelpCircle size={18} color={Colors.accent} />
-                 </View>
-                 <View style={styles.infoTextContainer}>
-                   <Text style={styles.infoLabel}>Member Since</Text>
-                   <Text style={styles.infoValue}>{new Date(currentUser.date_joined).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</Text>
-                 </View>
-               </View>
-             )}
           </View>
         </View>
 
@@ -201,13 +190,15 @@ const ProfileScreen = ({ navigation }: any) => {
           ))}
         </View>
 
-        <TouchableOpacity 
-          style={styles.logoutBtn}
-          onPress={handleLogout}
-        >
-          <LogOut size={22} color={Colors.error} />
-          <Text style={[Typography.bodyMedium, styles.logoutText]}>Logout</Text>
-        </TouchableOpacity>
+        <View>
+          <TouchableOpacity 
+            style={styles.logoutBtn}
+            onPress={handleLogout}
+          >
+            <LogOut size={22} color={Colors.error} />
+            <Text style={[Typography.bodyMedium, styles.logoutText]}>Logout</Text>
+          </TouchableOpacity>
+        </View>
 
         <Text style={styles.version}>Version 1.0.0</Text>
       </ScrollView>
@@ -217,8 +208,12 @@ const ProfileScreen = ({ navigation }: any) => {
         animationType="slide"
         onRequestClose={() => setAdminModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={{ flex: 1 }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={[Typography.h3, styles.modalTitle]}>Admin Portal</Text>
               <TouchableOpacity onPress={() => setAdminModalVisible(false)}>
@@ -269,8 +264,9 @@ const ProfileScreen = ({ navigation }: any) => {
                 )}
               </TouchableOpacity>
             </View>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -282,12 +278,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    paddingTop: 40,
-    paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingHorizontal: 24,
+    paddingBottom: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
   },
   backBtn: {
     marginRight: 15,
@@ -301,13 +304,16 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   profileCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.white,
     borderRadius: 24,
     padding: 24,
     alignItems: 'center',
     marginBottom: 30,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
   },
   avatarContainer: {
     position: 'relative',
@@ -343,8 +349,6 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -373,12 +377,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   menuContainer: {
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.white,
     borderRadius: 24,
     paddingVertical: 10,
     marginBottom: 30,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
   },
   menuItem: {
     flexDirection: 'row',
@@ -453,10 +460,11 @@ const styles = StyleSheet.create({
   adminLoginBtn: {
     backgroundColor: Colors.accent,
     height: 50,
-    borderRadius: 12,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 10,
+    elevation: 4,
   },
   adminLoginBtnText: {
     color: Colors.white,
@@ -469,7 +477,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(250, 56, 62, 0.1)',
     height: 56,
-    borderRadius: 16,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(250, 56, 62, 0.2)',
   },

@@ -1,5 +1,7 @@
 import React from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, LogBox } from 'react-native';
+
+LogBox.ignoreAllLogs();
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -8,7 +10,7 @@ function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" backgroundColor="#1A1A1A" />
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
         <AppNavigator />
       </SafeAreaProvider>
     </GestureHandlerRootView>

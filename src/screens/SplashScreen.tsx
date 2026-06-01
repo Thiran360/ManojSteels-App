@@ -27,9 +27,14 @@ const SplashScreen = ({ navigation }: any) => {
 
 
     const timer = setTimeout(async () => {
+      await authService.waitForInit();
       const user = authService.getCurrentUser();
       if (user) {
-        navigation.replace('Main');
+        if (user.role === 'admin') {
+          navigation.replace('Admin');
+        } else {
+          navigation.replace('Main');
+        }
       } else {
         navigation.replace('Login');
       }
@@ -42,7 +47,7 @@ const SplashScreen = ({ navigation }: any) => {
     <View style={styles.container}>
       <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
         <Image 
-          source={require('../assets/logo.png')} 
+          source={require('../assets/logo_manoj.jpg')} 
           style={styles.logo} 
           resizeMode="contain" 
         />

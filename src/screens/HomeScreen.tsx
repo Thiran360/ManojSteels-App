@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
@@ -45,10 +46,13 @@ import {
   Hexagon, 
   Droplet,
   MoreHorizontal,
-  Trash2
+  Trash2,
+  Truck
 } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
+const bannerWidth = width - 40;
+const bannerHeight = 160; // Increased from a small aspect ratio based calculation
 
 const DEFAULT_CATEGORIES = [
   { id: '1', name: 'Cement', image: require('../assets/cement_bags.png'), color: '#1877F2' },
@@ -60,23 +64,43 @@ const DEFAULT_CATEGORIES = [
   { id: '7', name: 'Laundry Stone', image: require('../assets/laundry_stone.png'), color: '#00BCD4' },
   { id: '8', name: 'Blue Metal', image: require('../assets/blue_metal.png'), color: '#673AB7' },
   { id: '9', name: 'Water Tanks', image: require('../assets/water_tanks.png'), color: '#03A9F4' },
-  { id: '10', name: 'Others', image: require('../assets/others.png'), color: '#9E9E9E' },
+  { id: '11', name: 'Others', image: require('../assets/others.png'), color: '#9E9E9E' },
 ];
 
 
 
 const banners = [
-  { id: '1', title: 'Cement Offers', discount: 'UP TO 20% OFF', color: '#1A1A1A' },
-  { id: '2', title: 'TMT Discount', discount: 'FLAT ₹5000 OFF', color: '#2C3E50' },
-  { id: '3', title: 'Water Tanks', discount: 'FREE DELIVERY', color: '#FF6B00' },
+  { id: '1', route: 'Cement', title: 'Premium Cement', subtitle: 'Build strong foundations', image: require('../assets/banner_cement.png') },
+  { id: '2', route: 'TMT Bars', title: 'High-Grade TMT Bars', subtitle: 'Maximum tensile strength', image: require('../assets/banner_tmt.png') },
+  { id: '3', route: 'Kadapa Slabs', title: 'Kadapa Stone Slabs', subtitle: 'Elegant & durable flooring', image: require('../assets/banner_kadapa.png') },
+  { id: '4', route: 'Blue Metal', title: 'Crushed Blue Metal', subtitle: 'Perfect for concrete mixing', image: require('../assets/banner_blue_metal.png') },
+  { id: '5', route: 'Building Blocks', title: 'Solid Building Blocks', subtitle: 'Reliable construction materials', image: require('../assets/building_blocks.png') },
 ];
 
 const HomeScreen = ({ navigation }: any) => {
   const [dynamicProducts, setDynamicProducts] = React.useState(cartService.getProducts());
   const [loading, setLoading] = React.useState(false);
-  const [categories, setCategories] = React.useState(DEFAULT_CATEGORIES);
-
+  const [categories, setCategories] = React.useState(cartService.getCategories());
+  const [cartCount, setCartCount] = React.useState(cartService.getCartItems().length);
+  const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = React.useState(false);
+  const scrollViewRef = React.useRef<any>(null);
+  const [currentBannerIndex, setCurrentBannerIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      let nextIndex = currentBannerIndex + 1;
+      if (nextIndex >= banners.length) {
+        nextIndex = 0;
+      }
+      if (scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({ x: nextIndex * (width - 20), animated: true });
+      }
+      setCurrentBannerIndex(nextIndex);
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [currentBannerIndex]);
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -89,8 +113,8 @@ const HomeScreen = ({ navigation }: any) => {
       setLoading(true);
       try {
         await cartService.apiFetchProducts();
-        // Fetch categories removed to use static categories instead
-        setCategories(DEFAULT_CATEGORIES);
+        await cartService.apiFetchCategories();
+        setCategories(cartService.getCategories());
       } catch (e) {
         console.error("Home Data Fetch Error:", e);
       } finally {
@@ -100,12 +124,17 @@ const HomeScreen = ({ navigation }: any) => {
 
     fetchRealProducts();
 
-    const update = () => setDynamicProducts(cartService.getProducts());
+    const update = () => {
+      setDynamicProducts(cartService.getProducts());
+      setCartCount(cartService.getCartItems().length);
+      setCategories(cartService.getCategories());
+    };
     cartService.on('change', update);
     return () => cartService.off('change', update);
   }, []);
 
   const floatingAnim = useSharedValue(0);
+  const pulseAnim = useSharedValue(1);
   React.useEffect(() => {
     floatingAnim.value = withRepeat(
       withSequence(
@@ -115,10 +144,21 @@ const HomeScreen = ({ navigation }: any) => {
       -1,
       true
     );
-  }, [floatingAnim]);
+    pulseAnim.value = withRepeat(
+      withSequence(
+        withTiming(1.2, { duration: 1000 }),
+        withTiming(1, { duration: 1000 })
+      ),
+      -1,
+      true
+    );
+  }, [floatingAnim, pulseAnim]);
 
   const floatingStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: floatingAnim.value }]
+  }));
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseAnim.value }]
   }));
   const renderCategory = ({ item, index }: { item: any; index: number }) => {
     const IconComponent = item.icon;
@@ -133,8 +173,10 @@ const HomeScreen = ({ navigation }: any) => {
           onPress={() => {
             if (item.name === 'Others') {
               navigation.navigate('NewArrivals');
-            } else {
+            } else if (DEFAULT_CATEGORIES.some(cat => cat.name === item.name && cat.name !== 'Others')) {
               navigation.navigate(item.name);
+            } else {
+              navigation.navigate('ProductList', { category: item.name, categoryId: item.id });
             }
           }}
         >
@@ -147,9 +189,9 @@ const HomeScreen = ({ navigation }: any) => {
             ]}
           >
             {item.image ? (
-              <Image source={typeof item.image === 'number' ? item.image : { uri: item.image }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
+              <Image source={typeof item.image === 'string' ? { uri: item.image } : item.image} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
             ) : (
-              <IconComponent size={28} color={item.color} strokeWidth={2.5} />
+              <Text style={{ fontSize: 28 }}>{item.icon || '📦'}</Text>
             )}
           </Animated.View>
           <Text style={[Typography.bodySmall, styles.categoryName]}>{item.name}</Text>
@@ -200,7 +242,7 @@ const HomeScreen = ({ navigation }: any) => {
   return (
     <View style={styles.container}>
       {/* Custom Header */}
-      <Animated.View entering={FadeInDown.duration(800)} style={styles.header}>
+      <Animated.View entering={FadeInDown.duration(800)} style={[styles.header, { paddingTop: Math.max(insets.top, 20), paddingBottom: 15 }]}>
         <View style={styles.headerLeft}>
           <View style={styles.headerTitleContainer}>
             <Image 
@@ -211,14 +253,13 @@ const HomeScreen = ({ navigation }: any) => {
           </View>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerButton}>
-            <Bell size={24} color={Colors.primary} />
-          </TouchableOpacity>
           <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate('Cart')}>
             <ShoppingCart size={24} color={Colors.primary} />
-            <Animated.View entering={ZoomIn.delay(500)} style={styles.badge}>
-              <Text style={styles.badgeText}>3</Text>
-            </Animated.View>
+            {cartCount > 0 && (
+              <Animated.View entering={ZoomIn.delay(500)} style={[styles.badge, pulseStyle]}>
+                <Text style={styles.badgeText}>{cartCount}</Text>
+              </Animated.View>
+            )}
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -240,34 +281,61 @@ const HomeScreen = ({ navigation }: any) => {
 
         {/* Banner Slider */}
         <Animated.ScrollView
+          ref={scrollViewRef}
           horizontal
-          pagingEnabled
+          pagingEnabled={false}
+          snapToInterval={bannerWidth + 20}
+          decelerationRate="fast"
           showsHorizontalScrollIndicator={false}
           style={styles.bannerContainer}
           entering={FadeIn.delay(400)}
+          onMomentumScrollEnd={(event) => {
+            const index = Math.round(event.nativeEvent.contentOffset.x / (bannerWidth + 20));
+            setCurrentBannerIndex(index);
+          }}
         >
           {banners.map((banner, index) => (
             <Animated.View entering={FadeInRight.delay(600 + index * 200).springify()} key={banner.id}>
-              <LinearGradient
-                colors={[Colors.primary, Colors.secondary]}
-                style={styles.banner}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+              <TouchableOpacity 
+                activeOpacity={0.9} 
+                style={styles.bannerImageContainer}
+                onPress={() => navigation.navigate(banner.route)}
               >
+                <Image 
+                  source={banner.image} 
+                  style={{ width: '100%', height: '100%' }} 
+                  resizeMode="cover"
+                />
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.95)']}
+                  style={StyleSheet.absoluteFill}
+                />
                 <View style={styles.bannerTextContainer}>
-                  <Text style={[Typography.h2, styles.bannerTitle]}>{banner.title}</Text>
-                  <Text style={[Typography.bodyMedium, styles.bannerDiscount]}>{banner.discount}</Text>
-                  <TouchableOpacity style={styles.shopNowButton}>
-                    <Text style={styles.shopNowText}>Shop Now</Text>
-                  </TouchableOpacity>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={styles.bannerTitle}>{banner.title}</Text>
+                    <Text style={styles.bannerSubtitle}>{banner.subtitle}</Text>
+                  </View>
+                  <View style={styles.shopButton}>
+                    <Text style={styles.shopButtonText}>Shop Now</Text>
+                  </View>
                 </View>
-                <Animated.View style={[styles.bannerOverlayIcon, floatingStyle]}>
-                  <Text style={{ fontSize: 80, opacity: 0.2 }}>🏗️</Text>
-                </Animated.View>
-              </LinearGradient>
-            </Animated.View>
-          ))}
-        </Animated.ScrollView>
+                </TouchableOpacity>
+              </Animated.View>
+            ))}
+          </Animated.ScrollView>
+          
+          {/* Pagination Dots */}
+          <View style={styles.paginationContainer}>
+            {banners.map((_, index) => (
+              <Animated.View 
+                key={index} 
+                style={[
+                  styles.paginationDot, 
+                  currentBannerIndex === index ? styles.paginationDotActive : null
+                ]} 
+              />
+            ))}
+          </View>
 
         {/* Categories Section */}
         <View style={styles.sectionHeader}>
@@ -329,17 +397,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 35,
-    height: 85,
+    paddingHorizontal: 24,
     backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    elevation: 3,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 10,
+    zIndex: 10,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -390,14 +457,17 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 50,
+    backgroundColor: Colors.white,
+    borderRadius: 25,
+    paddingHorizontal: 20,
+    height: 52,
     marginTop: 20,
     marginBottom: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
   },
   searchText: {
     color: Colors.textSecondary,
@@ -407,44 +477,84 @@ const styles = StyleSheet.create({
   bannerContainer: {
     marginBottom: 30,
   },
-  banner: {
-    width: width - 40,
-    height: 160,
-    borderRadius: 20,
+  bannerImageContainer: {
+    width: bannerWidth,
+    height: bannerHeight,
+    borderRadius: 24,
     marginRight: 20,
-    padding: 24,
-    flexDirection: 'row',
     overflow: 'hidden',
+    backgroundColor: Colors.surface,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
   },
   bannerTextContainer: {
-    flex: 2,
-    justifyContent: 'center',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   bannerTitle: {
     color: Colors.white,
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
-  bannerDiscount: {
-    color: Colors.accent,
-    fontWeight: 'bold',
-    marginTop: 4,
+  bannerSubtitle: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
-  shopNowButton: {
-    backgroundColor: Colors.white,
-    paddingVertical: 8,
+  shopButton: {
+    backgroundColor: Colors.primary,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-    marginTop: 16,
-  },
-  shopNowText: {
-    color: Colors.primary,
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  bannerOverlayIcon: {
-    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 24,
     justifyContent: 'center',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  shopButtonText: {
+    color: Colors.white,
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: -15,
+    marginBottom: 25,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#CED0D4',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    width: 24,
+    backgroundColor: Colors.primary,
+  },
+  spriteImage: {
+    width: '100%',
+    height: bannerHeight * 5, 
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -469,23 +579,22 @@ const styles = StyleSheet.create({
   categoriesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    gap: 10,
     marginBottom: 30,
   },
   categoryCard: {
-    width: (width - 60) / 3,
+    width: (width - 65) / 3,
     alignItems: 'center',
     marginBottom: 15,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.white,
     paddingVertical: 18,
     borderRadius: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    elevation: 2,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
   },
   categoryIconContainer: {
     width: 60,
@@ -508,9 +617,14 @@ const styles = StyleSheet.create({
   fullWidthBanner: {
     width: '100%',
     height: 180,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: 'hidden',
     position: 'relative',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
   },
   fullWidthImage: {
     width: '100%',
@@ -535,21 +649,21 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   trendingCard: {
-    width: 160,
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
+    width: 170,
+    backgroundColor: Colors.white,
+    borderRadius: 24,
     marginRight: 16,
-    padding: 12,
-    elevation: 4,
+    padding: 14,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
   },
   trendingImage: {
     width: '100%',
     height: 120,
-    borderRadius: 12,
+    borderRadius: 18,
     backgroundColor: Colors.background,
     marginBottom: 10,
   },

@@ -5,23 +5,23 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  ImageBackground,
   Dimensions,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   ActivityIndicator,
+  Alert,
+  Modal,
+  ImageBackground,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
-import { Eye, EyeOff, Phone, Lock } from 'lucide-react-native';
+import { Eye, EyeOff, Phone, Lock, Factory } from 'lucide-react-native';
 import { authService } from '../services/AuthService';
-import { Alert } from 'react-native';
-import Animated, { FadeInDown, FadeInUp, FadeIn, Layout, ZoomIn } from 'react-native-reanimated';
-import AnimatedBackground from '../components/AnimatedBackground';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 const LoginScreen = ({ navigation, route }: any) => {
   const [loading, setLoading] = useState(false);
@@ -29,14 +29,13 @@ const LoginScreen = ({ navigation, route }: any) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [loginType, setLoginType] = useState('User'); // 'User' or 'Admin'
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsModalVisible, setTermsModalVisible] = useState(false);
   
   useEffect(() => {
     if (route.params?.phone) {
       setMobile(route.params.phone);
     }
-    
-    // Auto-navigate if already logged in
     const user = authService.getCurrentUser();
     if (user) {
       navigation.replace('Main');
@@ -52,29 +51,29 @@ const LoginScreen = ({ navigation, route }: any) => {
       return;
     }
 
+    if (!termsAccepted) {
+      Alert.alert('Terms & Conditions', 'You must agree to the Terms & Conditions to log in.');
+      return;
+    }
+
     setLoading(true);
     try {
       const adminCreds = authService.getAdminCredentials();
       const isMasterAdmin = cleanedMobile === '0000' && cleanedPassword === 'admin';
       const isConfiguredAdmin = adminCreds && cleanedMobile === adminCreds.mobile && cleanedPassword === adminCreds.password;
 
-      // If either master admin or configured admin credentials are used, log in as Admin
       if (isMasterAdmin || isConfiguredAdmin) {
+        await authService.loginAdmin(cleanedMobile, cleanedPassword, true);
         navigation.replace('Admin');
-      } else if (loginType === 'Admin') {
-        // If they attempted admin login but credentials did not match
-        Alert.alert('Admin Access Denied', 'Invalid Admin Credentials');
-      } else if (loginType === 'Employee') {
-        const employees = authService.getEmployeeCredentials();
-        const validEmp = employees.find((e: any) => e.mobile === cleanedMobile && e.password === cleanedPassword);
-        if (validEmp) {
-          navigation.replace('Main');
-        } else {
-          Alert.alert('Employee Access Denied', 'Invalid Employee Credentials');
-        }
+        return;
+      }
+      
+      const user = await authService.login(cleanedMobile, cleanedPassword);
+      const role = user.role?.toLowerCase() || '';
+
+      if (role === 'admin') {
+        navigation.replace('Admin');
       } else {
-        // Regular user login path
-        await authService.login(cleanedMobile, cleanedPassword);
         navigation.replace('Main');
       }
     } catch (e: any) {
@@ -89,54 +88,40 @@ const LoginScreen = ({ navigation, route }: any) => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <AnimatedBackground />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        
+        {/* Header Section */}
         <Animated.View 
           entering={FadeInDown.duration(800).delay(200)}
           style={styles.header}
         >
+          <View style={styles.logoContainer}>
+            <LinearGradient
+              colors={[Colors.primary, Colors.secondary]}
+              style={styles.logoCircle}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Factory size={40} color={Colors.white} />
+            </LinearGradient>
+          </View>
           <Text style={[Typography.h1, styles.welcomeText]}>Welcome Back</Text>
           <Text style={[Typography.bodyMedium, styles.subtitle]}>
-            Sign in to continue building your dreams
+            Sign in to Manoj Steels
           </Text>
         </Animated.View>
 
+        {/* Login Card */}
         <Animated.View 
           entering={FadeInDown.duration(800).delay(400)}
           style={styles.formContainer}
         >
-          <LinearGradient
-            colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.02)']}
-            style={styles.card}
-          >
-            <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.loginTabSwitch}>
-              <TouchableOpacity 
-                style={[styles.loginTab, loginType === 'User' && styles.loginTabActive]}
-                onPress={() => setLoginType('User')}
-              >
-                <Text style={[styles.loginTabText, loginType === 'User' && styles.loginTabTextActive]}>User</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.loginTab, loginType === 'Employee' && styles.loginTabActive]}
-                onPress={() => setLoginType('Employee')}
-              >
-                <Text style={[styles.loginTabText, loginType === 'Employee' && styles.loginTabTextActive]}>Employee</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.loginTab, loginType === 'Admin' && styles.loginTabActive]}
-                onPress={() => setLoginType('Admin')}
-              >
-                <Text style={[styles.loginTabText, loginType === 'Admin' && styles.loginTabTextActive]}>Admin</Text>
-              </TouchableOpacity>
-            </Animated.View>
+          <View style={styles.card}>
+            <Text style={[Typography.h3, styles.formTitle]}>Login to your account</Text>
 
-            <Animated.Text entering={FadeInDown.delay(600).duration(600)} style={[Typography.h3, styles.formTitle]}>
-              {loginType === 'User' ? 'Login' : loginType === 'Employee' ? 'Employee Portal' : 'Admin Portal'}
-            </Animated.Text>
-
-            <Animated.View entering={FadeInDown.delay(700).duration(600)} style={styles.inputGroup}>
+            <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.inputGroup}>
               <View style={styles.iconContainer}>
-                <Phone size={20} color={Colors.accent} />
+                <Phone size={20} color={Colors.primary} />
               </View>
               <TextInput
                 style={styles.input}
@@ -145,12 +130,13 @@ const LoginScreen = ({ navigation, route }: any) => {
                 keyboardType="phone-pad"
                 value={mobile}
                 onChangeText={setMobile}
+                autoCapitalize="none"
               />
             </Animated.View>
 
-            <Animated.View entering={FadeInDown.delay(800).duration(600)} style={styles.inputGroup}>
+            <Animated.View entering={FadeInDown.delay(700).duration(600)} style={styles.inputGroup}>
               <View style={styles.iconContainer}>
-                <Lock size={20} color={Colors.accent} />
+                <Lock size={20} color={Colors.primary} />
               </View>
               <TextInput
                 style={styles.input}
@@ -192,14 +178,35 @@ const LoginScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             </View>
 
-            <Animated.View entering={FadeInUp.delay(1000).springify()}>
+            <View style={styles.termsRow}>
+              <TouchableOpacity
+                style={styles.rememberRow}
+                onPress={() => setTermsAccepted(!termsAccepted)}
+              >
+                <View style={[styles.checkbox, termsAccepted && styles.checkboxActive]}>
+                  {termsAccepted && <View style={styles.checkboxInner} />}
+                </View>
+                <View style={styles.termsTextContainer}>
+                  <Text style={[Typography.bodySmall, styles.rememberText]}>
+                    I agree to the 
+                  </Text>
+                  <TouchableOpacity onPress={() => setTermsModalVisible(true)}>
+                    <Text style={[Typography.bodySmall, styles.termsLink]}>
+                      {' '}Terms & Conditions
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <Animated.View entering={FadeInUp.delay(900).springify()}>
               <TouchableOpacity
                 style={[styles.loginButton, loading && styles.disabledButton]}
                 onPress={handleLogin}
                 disabled={loading}
               >
                 <LinearGradient
-                  colors={[Colors.primary, Colors.secondary]}
+                  colors={[Colors.primary, '#0052cc']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
@@ -208,28 +215,52 @@ const LoginScreen = ({ navigation, route }: any) => {
                     <ActivityIndicator color={Colors.white} />
                   ) : (
                     <Text style={[Typography.button, styles.buttonText]}>
-                      {loginType === 'User' ? 'USER LOGIN' : loginType === 'Employee' ? 'EMPLOYEE LOGIN' : 'ADMIN LOGIN'}
+                      Sign In
                     </Text>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
             </Animated.View>
-
-          </LinearGradient>
+          </View>
         </Animated.View>
 
-        {loginType === 'User' && (
-          <Animated.View entering={FadeIn.delay(1200)} style={styles.footer}>
-            <Text style={[Typography.bodySmall, styles.noAccountText]}>
-              Don't have an account?
-            </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-              <Text style={[Typography.bodySmall, styles.signUpText]}>Sign Up</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
       </ScrollView>
+
+      {/* Terms Modal */}
+      <Modal
+        visible={termsModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setTermsModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={{ flex: 1 }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Terms & Conditions</Text>
+              <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalText}>
+                  Welcome to Manoj Steels. By accessing this B2B platform, you agree to the following terms:{'\n\n'}
+                  1. Authorized Use: This platform is restricted to authorized employees and verified B2B customers.{'\n\n'}
+                  2. Pricing & Orders: All orders for Cement, TMT Bars, and Kadapa Slabs are subject to real-time availability and market pricing fluctuations.{'\n\n'}
+                  3. Employee Duties: Employees utilizing this app for attendance, fuel tracking, and inventory management must provide accurate and truthful information.{'\n\n'}
+                  4. Returns: Goods once sold cannot be returned under any circumstances.{'\n\n'}
+                  5. Privacy: Your contact information, location data (if applicable for attendance), and order history are securely stored for operational purposes.
+                </Text>
+              </ScrollView>
+              <TouchableOpacity 
+                style={styles.modalCloseBtn}
+                onPress={() => setTermsModalVisible(false)}
+              >
+                <Text style={styles.modalCloseText}>I Understand</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 };
@@ -237,7 +268,7 @@ const LoginScreen = ({ navigation, route }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#F6F8FB',
   },
   scrollContent: {
     flexGrow: 1,
@@ -245,80 +276,72 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   header: {
-    marginTop: height * 0.1,
-    marginBottom: 40,
+    marginTop: height * 0.08,
+    marginBottom: 30,
+    alignItems: 'center',
+  },
+  logoContainer: {
+    marginBottom: 20,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  logoCircle: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   welcomeText: {
-    color: Colors.white,
+    color: Colors.text,
     textAlign: 'center',
+    fontWeight: '800',
+    fontSize: 28,
   },
   subtitle: {
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: Colors.textSecondary,
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
   formContainer: {
     width: '100%',
   },
   card: {
-    padding: 24,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-  },
-  loginTabSwitch: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(24, 119, 242, 0.05)',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  loginTab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  loginTabActive: {
-    backgroundColor: Colors.accent,
-  },
-  loginTabText: {
-    color: Colors.textSecondary,
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  loginTabTextActive: {
-    color: Colors.white,
-  },
+      padding: 32,
+      borderRadius: 32,
+      backgroundColor: Colors.white,
+      elevation: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 15 },
+      shadowOpacity: 0.1,
+      shadowRadius: 30,
+    },
   formTitle: {
     color: Colors.text,
-    marginBottom: 24,
+    marginBottom: 28,
     textAlign: 'center',
+    fontWeight: '700',
+    fontSize: 20,
   },
   inputGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#F9FAFB',
+      borderRadius: 20,
+      marginBottom: 16,
+      paddingHorizontal: 20,
+      borderWidth: 1,
+      borderColor: '#F3F4F6',
+    },
   iconContainer: {
     marginRight: 12,
   },
   input: {
     flex: 1,
-    height: 50,
+    height: 56,
     color: Colors.text,
     ...Typography.bodyMedium,
   },
@@ -329,24 +352,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
+    marginTop: 8,
   },
   rememberRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: Colors.accent,
-    marginRight: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#D1D5DB',
+    marginRight: 10,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: Colors.white,
   },
   checkboxActive: {
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   checkboxInner: {
     width: 10,
@@ -356,31 +382,24 @@ const styles = StyleSheet.create({
   },
   rememberText: {
     color: Colors.textSecondary,
+    fontWeight: '500',
   },
   forgotText: {
-    color: Colors.accent,
+    color: Colors.primary,
+    fontWeight: '600',
   },
   loginButton: {
-    height: 56,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginTop: 20,
-  },
+      height: 64,
+      borderRadius: 20,
+      overflow: 'hidden',
+      elevation: 10,
+      shadowColor: Colors.primary,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.3,
+      shadowRadius: 20,
+    },
   disabledButton: {
     opacity: 0.7,
-  },
-  adminLoginButton: {
-    height: 56,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  adminLoginText: {
-    color: Colors.white,
-    letterSpacing: 1,
   },
   buttonGradient: {
     flex: 1,
@@ -389,45 +408,67 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: Colors.white,
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
-  otpDivider: {
+  termsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 30,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.border,
+  termsTextContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  dividerText: {
+  termsLink: {
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+  modalContent: {
+      backgroundColor: Colors.white,
+      borderRadius: 32,
+      padding: 32,
+      width: '100%',
+      maxHeight: '85%',
+      elevation: 15,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 20 },
+      shadowOpacity: 0.15,
+      shadowRadius: 35,
+    },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalScroll: {
+    marginBottom: 20,
+  },
+  modalText: {
+    fontSize: 14,
     color: Colors.textSecondary,
-    marginHorizontal: 16,
-    fontSize: 12,
+    lineHeight: 22,
   },
-  otpButton: {
-    height: 56,
+  modalCloseBtn: {
+    backgroundColor: Colors.primary,
+    height: 50,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  otpButtonText: {
-    color: Colors.accent,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 40,
-  },
-  noAccountText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginRight: 4,
-  },
-  signUpText: {
-    color: Colors.accent,
+  modalCloseText: {
+    color: Colors.white,
+    fontSize: 16,
     fontWeight: 'bold',
   },
 });

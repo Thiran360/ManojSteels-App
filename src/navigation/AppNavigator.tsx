@@ -3,7 +3,6 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import SplashScreen from '../screens/SplashScreen';
 import LoginScreen from '../screens/LoginScreen';
-import SignupScreen from '../screens/SignupScreen';
 import MainTabNavigator from './MainTabNavigator';
 import ProductListScreen from '../screens/ProductListScreen';
 import ProductDetailsScreen from '../screens/ProductDetailsScreen';
@@ -23,6 +22,10 @@ import TokensScreen from '../screens/TokensScreen';
 import NewArrivalsScreen from '../screens/NewArrivalsScreen';
 import PartySelectionScreen from '../screens/PartySelectionScreen';
 
+import { authService } from '../services/AuthService';
+import StaffProfileScreen from '../screens/StaffProfileScreen';
+import TilespasteScreen from '../screens/TilespasteScreen';
+
 const Stack = createNativeStackNavigator();
 
 const AppNavigator = () => {
@@ -37,7 +40,6 @@ const AppNavigator = () => {
       >
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Signup" component={SignupScreen} />
         <Stack.Screen name="Main" component={MainTabNavigator} />
         <Stack.Screen name="ProductList" component={ProductListScreen} />
         <Stack.Screen name="ProductDetails" component={ProductDetailsScreen} />
@@ -55,12 +57,14 @@ const AppNavigator = () => {
         <Stack.Screen name="Blue Metal" component={BlueMetalScreen} />
         <Stack.Screen name="Tokens" component={TokensScreen} />
         <Stack.Screen name="NewArrivals" component={NewArrivalsScreen} />
+        <Stack.Screen name="Tilespaste" component={TilespasteScreen} />
         <Stack.Screen 
           name="PartySelection" 
           component={PartySelectionScreen} 
           options={{ presentation: 'transparentModal', animation: 'fade' }} 
         />
-      </Stack.Navigator>
+              <Stack.Screen name="StaffProfile" component={StaffProfileScreen} />
+</Stack.Navigator>
     </NavigationContainer>
   );
 };

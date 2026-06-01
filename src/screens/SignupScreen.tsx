@@ -50,6 +50,7 @@ const InputField = ({ icon, placeholder, value, onChangeText, secureTextEntry = 
 const SignupScreen = ({ navigation }: any) => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [signupType, setSignupType] = useState('customer');
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -65,7 +66,7 @@ const SignupScreen = ({ navigation }: any) => {
 
     setLoading(true);
     try {
-      await authService.signup(formData);
+      await authService.signup({ ...formData, role: signupType });
       Alert.alert('Success', 'Account created successfully!');
       navigation.replace('Main');
     } catch (e: any) {
@@ -92,6 +93,27 @@ const SignupScreen = ({ navigation }: any) => {
         >
           <Text style={[Typography.h1, styles.title]}>Create Account</Text>
           <Text style={[Typography.bodyMedium, styles.subtitle]}>Join Manoj Steels today</Text>
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.roleTabSwitch}>
+          <TouchableOpacity 
+            style={[styles.roleTab, signupType === 'customer' && styles.roleTabActive]}
+            onPress={() => setSignupType('customer')}
+          >
+            <Text style={[styles.roleTabText, signupType === 'customer' && styles.roleTabTextActive]}>Customer</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.roleTab, signupType === 'employee' && styles.roleTabActive]}
+            onPress={() => setSignupType('employee')}
+          >
+            <Text style={[styles.roleTabText, signupType === 'employee' && styles.roleTabTextActive]}>Employee</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.roleTab, signupType === 'admin' && styles.roleTabActive]}
+            onPress={() => setSignupType('admin')}
+          >
+            <Text style={[styles.roleTabText, signupType === 'admin' && styles.roleTabTextActive]}>Admin</Text>
+          </TouchableOpacity>
         </Animated.View>
 
         <View style={styles.form}>
@@ -197,6 +219,31 @@ const styles = StyleSheet.create({
   subtitle: {
     color: 'rgba(255, 255, 255, 0.8)',
     marginTop: 8,
+  },
+  roleTabSwitch: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+  },
+  roleTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  roleTabActive: {
+    backgroundColor: Colors.white,
+  },
+  roleTabText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  roleTabTextActive: {
+    color: Colors.primary,
+    fontWeight: 'bold',
   },
   form: {
     gap: 20,

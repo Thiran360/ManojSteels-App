@@ -5,6 +5,8 @@ class CartService {
   private cartItems: any[] = [];
   private orders: any[] = [];
   private products: any[] = [];
+  private categories: any[] = [];
+  private walkinCustomers: any[] = [];
   private bulkOrders: any[] = []; // Dedicated list for Bulk Orders
   private tokenCounter: number = 101; // Starting token for bulk
   private loyaltyTokens: number = 2800;
@@ -86,6 +88,7 @@ class CartService {
   getCartItems() { return this.cartItems; }
   getOrders() { return this.orders; }
   getProducts() { return this.products; }
+  getCategories() { return this.categories; }
   getActiveParty() { return this.activeParty; }
   async setActiveParty(party: { name: string; phone: string } | null) {
     this.activeParty = party;
@@ -103,9 +106,34 @@ class CartService {
   }
 
   async deleteOrder(id: string) {
-    this.orders = this.orders.filter(o => o.id !== id);
-    await this.saveData();
-    this.notify();
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/delete_order/', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ order_id: Number(id) }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('Delete Order API Error:', errorText);
+        throw new Error(`Failed to delete order: ${errorText}`);
+      }
+
+      // Remove from local list immediately
+      this.orders = this.orders.filter(o => String(o.id) !== String(id));
+      await this.saveData();
+      this.notify();
+
+      // Refresh from server
+      await this.apiFetchQuotations();
+    } catch (e) {
+      console.log('Delete Order Error:', e);
+      throw e;
+    }
   }
 
   addBrand(brand: string) {
@@ -863,14 +891,21 @@ class CartService {
   async apiFixPrice(id: string, updates: any[]) {
     try {
       console.log('Fixing prices for order:', id, 'Updates:', updates);
-      const response = await fetch(`https://api.codingboss.in/inventory/orders/${id}/fix_price/`, {
+
+      // Map each item to the format the API expects: { item_id, price }
+      const itemsPayload = updates.map(i => ({
+        item_id: i.id,           // order item's unique ID (from backend)
+        price: parseFloat(i.price) || 0,
+      }));
+
+      const response = await fetch(`https://api.codingboss.in/inventory/fix-order-prices/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'ngrok-skip-browser-warning': 'true',
         },
-        body: JSON.stringify({ items: updates }),
+        body: JSON.stringify({ order_id: Number(id), items: itemsPayload }),
       });
 
       if (!response.ok) {
@@ -1026,24 +1061,182 @@ class CartService {
 
       console.log('Categories API Response:', result);
 
+      let fetchedCats: any[] = [];
       if (Array.isArray(result)) {
-        return result;
+        fetchedCats = result;
+      } else if (result.value && Array.isArray(result.value)) {
+        fetchedCats = result.value;
+      } else if (result.categories) {
+        fetchedCats = result.categories;
       }
 
-      if (result.value && Array.isArray(result.value)) {
-        return result.value;
-      }
-
-      if (result.categories) {
-        return result.categories;
-      }
-
-      return [];
-
+      this.categories = fetchedCats.map(c => ({
+        ...c,
+        image: c.image && c.image.startsWith('/media/') ? `https://api.codingboss.in${c.image}` : c.image
+      }));
+      
+      this.notify();
+      return this.categories;
     } catch (e) {
       console.log('Fetch Categories Error:', e);
       return [];
     }
+  }
+
+  async apiAddCategory(data: { name: string; image: string }) {
+    try {
+      const formData = new FormData();
+      formData.append('name', data.name);
+      
+      if (data.image && (data.image.startsWith('file://') || data.image.startsWith('content://'))) {
+        const uri = data.image;
+        const filename = uri.split('/').pop() || `category_${Date.now()}.jpg`;
+        const type = uri.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        formData.append('image', {
+          uri: uri,
+          name: filename,
+          type: type,
+        } as any);
+      }
+
+      const response = await fetch('https://api.codingboss.in/inventory/categories/', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Failed to add category');
+      
+      await this.apiFetchCategories(); // Refresh list
+      return await response.json();
+    } catch (e) {
+      console.log('API Add Category Error:', e);
+      throw e;
+    }
+  }
+
+  async apiUpdateCategory(id: string, data: { name: string; image: string }) {
+    try {
+      const formData = new FormData();
+      formData.append('id', id);
+      formData.append('name', data.name);
+      
+      if (data.image && (data.image.startsWith('file://') || data.image.startsWith('content://'))) {
+        const uri = data.image;
+        const filename = uri.split('/').pop() || `category_${Date.now()}.jpg`;
+        const type = uri.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        formData.append('image', {
+          uri: uri,
+          name: filename,
+          type: type,
+        } as any);
+      }
+
+      const response = await fetch(`https://api.codingboss.in/inventory/categories/`, {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Failed to update category');
+      
+      await this.apiFetchCategories(); // Refresh list
+      return await response.json();
+    } catch (e) {
+      console.log('API Update Category Error:', e);
+      throw e;
+    }
+  }
+
+  async apiDeleteCategory(id: string) {
+    try {
+      const response = await fetch(`https://api.codingboss.in/inventory/categories/`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ id: Number(id) })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Delete Category Error Response:', errorText);
+        throw new Error(`Failed to delete category: ${errorText}`);
+      }
+      
+      await this.apiFetchCategories(); // Refresh list
+      return true;
+    } catch (e) {
+      console.log('API Delete Category Error:', e);
+      throw e;
+    }
+  }
+
+  async apiUpdateProduct(id: string, productData: any) {
+    try {
+      const formData = new FormData();
+      formData.append('product_name', productData.name);
+      formData.append('brand_name', productData.brand || 'Generic');
+      formData.append('price', String(productData.price));
+      formData.append('stock_quantity', String(productData.qty));
+      formData.append('category', String(productData.category));
+
+      if (productData.image && (productData.image.startsWith('file://') || productData.image.startsWith('content://'))) {
+        const uri = productData.image;
+        const filename = uri.split('/').pop() || `product_${Date.now()}.jpg`;
+
+        formData.append('product_image', {
+          uri: uri,
+          name: filename,
+          type: 'image/jpeg',
+        } as any);
+      }
+
+      const response = await fetch(`https://api.codingboss.in/inventory/products/${id}/`, {
+        method: 'PUT',
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Update Product Error Response:', errorText);
+        throw new Error(`Failed to update product: ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      this.products = this.products.map(p => String(p.id) === String(id) ? { ...p, ...productData, id: result.id || id } : p);
+      this.notify();
+      return result;
+    } catch (e) {
+      console.log('API Update Product Error:', e);
+      throw e;
+    }
+  }
+
+  async apiFetchWalkinCustomers() {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/walkin-customers/');
+      if (response.ok) {
+        this.walkinCustomers = await response.json();
+        this.notify();
+      }
+    } catch (e) {
+      console.log('Error fetching walkin customers:', e);
+    }
+    return this.walkinCustomers;
   }
 }
 

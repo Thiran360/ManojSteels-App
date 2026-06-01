@@ -45,26 +45,35 @@ const TMTBarsScreen = ({ navigation }: any) => {
   }, []);
 
   const ProductCard = ({ item }: { item: any }) => {
-    const [sizeSelections, setSizeSelections] = useState<{[key: string]: number}>({});
+    const [sizeSelections, setSizeSelections] = useState<{[key: string]: { weight: string, qty: string }}>({});
     const [showPicker, setShowPicker] = useState(false);
     
     const sizes = ['6', '8', '10', '12', '16', '20', '25', '30', '32'];
 
-    const updateSizeQty = (size: string, delta: number) => {
+    const updateSizeWeight = (size: string, text: string) => {
+      setSizeSelections(prev => ({
+        ...prev,
+        [size]: { ...prev[size], weight: text }
+      }));
+    };
+
+    const updateSizeQty = (size: string, text: string) => {
+      setSizeSelections(prev => ({
+        ...prev,
+        [size]: { ...prev[size], qty: text }
+      }));
+    };
+
+    const removeSize = (size: string) => {
       setSizeSelections(prev => {
-        const current = prev[size] || 0;
-        const next = Math.max(0, current + delta);
-        if (next === 0) {
-          const { [size]: _, ...rest } = prev;
-          return rest;
-        }
-        return { ...prev, [size]: next };
+        const { [size]: _, ...rest } = prev;
+        return rest;
       });
     };
 
     const addSize = (size: string) => {
       if (!sizeSelections[size]) {
-        updateSizeQty(size, 1);
+        setSizeSelections(prev => ({ ...prev, [size]: { weight: '', qty: '1' } }));
       }
       setShowPicker(false);
     };
@@ -123,37 +132,62 @@ const TMTBarsScreen = ({ navigation }: any) => {
         {selectedEntries.length > 0 && (
           <View style={styles.selectionList}>
             <Text style={styles.sectionLabel}>Selected Sizes & Quantities:</Text>
-            {selectedEntries.map(([size, qty]) => (
+            {selectedEntries.map(([size, data]) => (
               <View key={size} style={styles.selectionRow}>
                 <View style={styles.sizeTag}>
                   <Text style={styles.sizeTagText}>{size}MM</Text>
                 </View>
                 <View style={styles.qtyControls}>
-                  <TouchableOpacity onPress={() => updateSizeQty(size, -1)} style={styles.qtyActionBtn}>
-                    <Minus size={14} color={Colors.text} />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyDisplay}>{qty}</Text>
-                  <TouchableOpacity onPress={() => updateSizeQty(size, 1)} style={styles.qtyActionBtn}>
-                    <Plus size={14} color={Colors.text} />
-                  </TouchableOpacity>
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={styles.weightInput}
+                      value={data.qty}
+                      onChangeText={(text) => updateSizeQty(size, text)}
+                      keyboardType="numeric"
+                      placeholder="Qty"
+                      placeholderTextColor={Colors.textSecondary}
+                    />
+                    <Text style={styles.kgText}>Qty</Text>
+                  </View>
+                  
+                  <View style={styles.inputWrapper}>
+                    <TextInput
+                      style={styles.weightInput}
+                      value={data.weight}
+                      onChangeText={(text) => updateSizeWeight(size, text)}
+                      keyboardType="numeric"
+                      placeholder="Weight"
+                      placeholderTextColor={Colors.textSecondary}
+                    />
+                    <Text style={styles.kgText}>KG</Text>
+                  </View>
                 </View>
-                <TouchableOpacity onPress={() => updateSizeQty(size, -qty)} style={styles.removeBtn}>
+                <TouchableOpacity onPress={() => removeSize(size)} style={styles.removeBtn}>
                    <X size={16} color={Colors.error} />
                 </TouchableOpacity>
               </View>
             ))}
 
-            <TouchableOpacity 
+              <TouchableOpacity 
               style={styles.bulkAddBtn} 
               onPress={() => {
-                const itemsToAdd = selectedEntries.map(([size, qty]) => {
+                const itemsToAdd = selectedEntries.map(([size, data]) => {
+                  const weight = parseFloat(data.weight) || 0;
+                  const qty = parseInt(data.qty, 10) || 0;
+                  if (weight <= 0 || qty <= 0) return null;
                   const itemWithSize = { 
                     ...item, 
                     id: `${item.id}-${size}`, 
-                    name: `${item.name} (${size}MM)` 
+                    name: `${item.name} (${size}MM - ${weight}kg)`,
+                    weight: weight
                   };
-                  return { item: itemWithSize, qty };
-                });
+                  return { item: itemWithSize, qty: qty };
+                }).filter(Boolean);
+                
+                if (itemsToAdd.length === 0) {
+                  Alert.alert('Error', 'Please enter valid weights and quantities for selected sizes');
+                  return;
+                }
                 
                 setSizeSelections({});
                 navigation.navigate('PartySelection', { items: itemsToAdd });
@@ -375,18 +409,31 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    marginLeft: 8,
   },
-  qtyActionBtn: {
-    padding: 8,
-    backgroundColor: Colors.background,
-    borderRadius: 6,
+  inputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 4,
   },
-  qtyDisplay: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  weightInput: {
+    flex: 1,
+    height: 36,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 8,
     color: Colors.text,
-    marginHorizontal: 15,
+    backgroundColor: Colors.background,
+    fontSize: 13,
+  },
+  kgText: {
+    marginLeft: 6,
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: Colors.textSecondary,
   },
   removeBtn: {
     padding: 8,

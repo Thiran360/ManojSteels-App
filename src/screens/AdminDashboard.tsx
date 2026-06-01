@@ -31,9 +31,17 @@ import {
   Package,
   X,
   Trash2,
+  Users,
   Eye,
   EyeOff,
-  Coins
+  Coins,
+  CalendarDays,
+  Ticket,
+  LayoutGrid,
+  Receipt,
+  ClipboardCheck,
+  Clock,
+  RefreshCw
 } from 'lucide-react-native';
 import { Calendar } from 'react-native-calendars';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -42,6 +50,15 @@ import Share from 'react-native-share';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import { cartService } from '../services/CartService';
 import { authService } from '../services/AuthService';
+import { fuelService } from '../services/FuelService';
+import { ActiveTokensList } from '../components/ActiveTokensList';
+
+const FUEL_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const formatFuelMonth = (yyyyMm: string) => {
+  if (!yyyyMm) return '';
+  const [y, m] = yyyyMm.split('-');
+  return `${FUEL_MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`;
+};
 
 const AdminDashboard = ({ navigation }: any) => {
   const [activeTab, setActiveTab] = useState('Orders');
@@ -61,10 +78,15 @@ const AdminDashboard = ({ navigation }: any) => {
   const [tempTruckNo, setTempTruckNo] = useState('');
 
   // Customize Bulk Order Modal State
+  const [showOrderCalendar, setShowOrderCalendar] = useState(false);
+  const [selectedOrderDate, setSelectedOrderDate] = useState<string>('');
   const [showCustomizeBulkModal, setShowCustomizeBulkModal] = useState(false);
   const [customizingOrder, setCustomizingOrder] = useState<any>(null);
   const [customBags, setCustomBags] = useState('');
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showTokenCalendar, setShowTokenCalendar] = useState(false);
+  const [selectedTokenDate, setSelectedTokenDate] = useState<string>('');
+  const [tokenFilter, setTokenFilter] = useState<'All' | "Today's" | 'Cancelled' | 'Completed'>('All');
   const [customLocation, setCustomLocation] = useState('');
   const [customTruckNo, setCustomTruckNo] = useState('');
   const [customDeliveryDate, setCustomDeliveryDate] = useState('');
@@ -75,6 +97,212 @@ const AdminDashboard = ({ navigation }: any) => {
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [tempItems, setTempItems] = useState<any[]>([]);
+  const [isEditingProduct, setIsEditingProduct] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+
+  // Accounts State
+  const [accName, setAccName] = useState('');
+  const [accPhone, setAccPhone] = useState('');
+  const [accPassword, setAccPassword] = useState('');
+  const [accRole, setAccRole] = useState('employee');
+  const [accountsList, setAccountsList] = useState<any[]>([]);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [accountsFilter, setAccountsFilter] = useState('All');
+
+  // Attendance State
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceDateFilter, setAttendanceDateFilter] = useState('');   // YYYY-MM-DD from calendar
+  const [attendanceRole, setAttendanceRole]     = useState('All');          // category tab
+  const [showAttendanceCalendar, setShowAttendanceCalendar] = useState(false);
+  const [attendanceMonthFilter, setAttendanceMonthFilter] = useState('');
+  const [showAttendanceMonthDropdown, setShowAttendanceMonthDropdown] = useState(false);
+
+  // Role → list-of-phones mapping (admin can extend this)
+  const ROLE_PHONES: Record<string, string[]> = {
+    Manager:      [],
+    Supervisor:   [],
+    Accountants:  [],
+    Drivers:      [],
+    'North Indians': [],
+  };
+
+  // Fuel State
+  const [fuelList, setFuelList] = useState<any[]>([]);
+  const [fuelLoading, setFuelLoading] = useState(false);
+  const [fuelDateFilter, setFuelDateFilter] = useState('');
+  
+  // Fuel Payments State
+  const [fuelMonthFilter, setFuelMonthFilter] = useState('');
+  const [fuelMonthPayments, setFuelMonthPayments] = useState<Record<string, number>>({});
+  const [showFuelPaymentModal, setShowFuelPaymentModal] = useState(false);
+  const [fuelPaymentInput, setFuelPaymentInput] = useState('');
+  const [showFuelMonthDropdown, setShowFuelMonthDropdown] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'Accounts') {
+      fetchAccounts();
+    }
+    if (activeTab === 'Attendance') {
+      fetchAttendance();
+    }
+    if (activeTab === 'Fuel') {
+      fetchFuel();
+    }
+  }, [activeTab]);
+
+  const fetchAccounts = async () => {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/get-users/');
+      const data = await response.json();
+      setAccountsList(data);
+    } catch(e) {
+      console.log('Error fetching accounts', e);
+    }
+  };
+
+  const fetchAttendance = async () => {
+    setAttendanceLoading(true);
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/attendance/', {
+        headers: { 'Accept': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      });
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : (data.value || []);
+      setAttendanceList(list);
+    } catch(e) {
+      console.log('Error fetching attendance', e);
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  const fetchFuel = async () => {
+    setFuelLoading(true);
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/fuel/', {
+        headers: { 'Accept': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+      });
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : (data.value || []);
+      setFuelList(list);
+
+      const summary = await fuelService.getMonthlySummary();
+      const paymentsMap: Record<string, number> = {};
+      summary.forEach(s => {
+        paymentsMap[s.month] = s.paid;
+      });
+      setFuelMonthPayments(paymentsMap);
+    } catch(e) {
+      console.log('Error fetching fuel', e);
+    } finally {
+      setFuelLoading(false);
+    }
+  };
+
+  const handleAddFuelPayment = async () => {
+    if (!fuelMonthFilter || !fuelPaymentInput) {
+      Alert.alert('Error', 'Please select a month and enter an amount');
+      return;
+    }
+    const amt = parseFloat(fuelPaymentInput);
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
+      return;
+    }
+    await fuelService.addFuelPayment(fuelMonthFilter, amt);
+    setShowFuelPaymentModal(false);
+    setFuelPaymentInput('');
+    Alert.alert('Success', 'Payment recorded successfully');
+    fetchFuel(); // Refresh payments
+  };
+
+  const handleCreateAccount = async () => {
+    if (!accName.trim() || !accPhone.trim() || !accPassword.trim()) {
+      Alert.alert('Error', 'Please fill all fields');
+      return;
+    }
+    setIsCreatingAccount(true);
+    try {
+      await authService.apiCreateEmployee({
+        name: accName,
+        phone: accPhone,
+        password: accPassword,
+        role: accRole
+      });
+      Alert.alert('Success', 'Account created successfully');
+      setAccName(''); setAccPhone(''); setAccPassword('');
+      fetchAccounts();
+    } catch(e: any) {
+      Alert.alert('Error', e.message || 'Failed to create account');
+    } finally {
+      setIsCreatingAccount(false);
+    }
+  };
+
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryImage, setNewCategoryImage] = useState('');
+  const [dynamicCategories, setDynamicCategories] = useState<any[]>([]);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'Categories') {
+      fetchDynamicCategories();
+    }
+  }, [activeTab]);
+
+  const fetchDynamicCategories = async () => {
+    try {
+      const cats = await cartService.apiFetchCategories();
+      if (cats && Array.isArray(cats)) {
+         setDynamicCategories(cats);
+      } else {
+         setDynamicCategories(cartService.getCategories() || []);
+      }
+    } catch(e) { 
+      console.log(e); 
+      setDynamicCategories(cartService.getCategories() || []);
+    }
+  };
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) {
+      Alert.alert('Error', 'Please enter a category name');
+      return;
+    }
+    setIsAddingCategory(true);
+    try {
+      await cartService.apiAddCategory({ name: newCategoryName, image: newCategoryImage });
+      Alert.alert('Success', 'Category added successfully');
+      setNewCategoryName('');
+      setNewCategoryImage('');
+      fetchDynamicCategories();
+    } catch(e: any) {
+      Alert.alert('Error', e.message || 'Failed to add category');
+    } finally {
+      setIsAddingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = (id: string) => {
+    Alert.alert('Confirm Delete', 'Are you sure you want to delete this category?', [
+      { text: 'Cancel', style: 'cancel' },
+      { 
+        text: 'Delete', 
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cartService.apiDeleteCategory(id);
+            Alert.alert('Success', 'Category deleted');
+            fetchDynamicCategories();
+          } catch(e: any) {
+            Alert.alert('Error', e.message || 'Failed to delete category');
+          }
+        }
+      }
+    ]);
+  };
+
   const [newProduct, setNewProduct] = useState({
     name: '',
     brand: '',
@@ -196,6 +424,24 @@ const AdminDashboard = ({ navigation }: any) => {
         </View>
       </View>
       <View style={styles.productActions}>
+        <TouchableOpacity 
+          style={[styles.deleteBtn, { backgroundColor: Colors.primary, marginRight: 10 }]}
+          onPress={() => {
+            setNewProduct({
+              name: item.name || '',
+              brand: item.brand || '',
+              price: item.price?.toString() || '',
+              qty: item.qty?.toString() || '',
+              image: item.image || '',
+              category: item.categoryId || item.category || 'Cement'
+            });
+            setIsEditingProduct(true);
+            setEditingProductId(item.id);
+            setShowAddProduct(true);
+          }}
+        >
+          <Text style={styles.deleteBtnText}>Edit</Text>
+        </TouchableOpacity>
         <TouchableOpacity 
           style={styles.deleteBtn}
           onPress={() => {
@@ -356,7 +602,7 @@ const AdminDashboard = ({ navigation }: any) => {
           <Printer size={18} color={Colors.textSecondary} />
         </TouchableOpacity>
 
-        {/* Customize Button */}
+        {/* Edit Button */}
         <TouchableOpacity 
           style={[styles.secondaryAction, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
           onPress={() => {
@@ -370,8 +616,31 @@ const AdminDashboard = ({ navigation }: any) => {
             setShowCustomizeBulkModal(true);
           }}
         >
-          <Text style={styles.actionBtnText}>✏️ Customize</Text>
+          <Text style={styles.actionBtnText}>✏️ Edit</Text>
         </TouchableOpacity>
+        
+        {/* Cancel Button */}
+        {item.status !== 'Delivered' && item.status !== 'Cancelled' && (
+          <TouchableOpacity 
+            style={[styles.secondaryAction, { borderColor: Colors.error, marginLeft: 8 }]}
+            onPress={() => {
+              Alert.alert(
+                'Cancel Order',
+                'Are you sure you want to cancel this order?',
+                [
+                  { text: 'No', style: 'cancel' },
+                  { 
+                    text: 'Yes, Cancel', 
+                    style: 'destructive', 
+                    onPress: () => cartService.updateBulkOrder(item.id, { status: 'Cancelled' }) 
+                  }
+                ]
+              );
+            }}
+          >
+            <Text style={[styles.actionBtnText, { color: Colors.error }]}>Cancel</Text>
+          </TouchableOpacity>
+        )}
         
         {item.status === 'In Queue' && (
           <TouchableOpacity 
@@ -433,7 +702,14 @@ const AdminDashboard = ({ navigation }: any) => {
                 { 
                   text: 'Delete', 
                   style: 'destructive',
-                  onPress: () => cartService.deleteOrder(item.id)
+                  onPress: async () => {
+                    try {
+                      await cartService.deleteOrder(item.id);
+                      Alert.alert('Deleted', 'Order deleted successfully.');
+                    } catch {
+                      Alert.alert('Error', 'Failed to delete order. Please try again.');
+                    }
+                  }
                 }
               ]
             );
@@ -496,6 +772,10 @@ const AdminDashboard = ({ navigation }: any) => {
         <TouchableOpacity 
           style={styles.primaryAction}
           onPress={() => {
+            if (!item.items || item.items.length === 0) {
+              Alert.alert('No Items', 'This order has no product items to price-fix. Items may have been stored as text notes only.');
+              return;
+            }
             setEditingOrderId(item.id);
             setTempItems(item.items.map((i: any) => ({ ...i, price: i.price || 0 })));
             setIsEditingPrice(true);
@@ -574,6 +854,19 @@ const AdminDashboard = ({ navigation }: any) => {
     });
   };
 
+  const pickCategoryImage = () => {
+    launchImageLibrary({ mediaType: 'photo', quality: 0.8 }, (response) => {
+      if (response.didCancel) return;
+      if (response.errorCode) {
+        Alert.alert('Error', response.errorMessage || 'Image Picker Error');
+        return;
+      }
+      if (response.assets && response.assets.length > 0) {
+        setNewCategoryImage(response.assets[0].uri || '');
+      }
+    });
+  };
+
   const handleAddProduct = async () => {
     if (!newProduct.name || !newProduct.category) {
       Alert.alert('Error', 'Please fill in the Product Name and Category');
@@ -582,8 +875,7 @@ const AdminDashboard = ({ navigation }: any) => {
     
     setLoading(true);
     try {
-      const product = {
-        id: `PROD-${Date.now()}`,
+      const productData = {
         name: newProduct.name,
         brand: newProduct.brand || 'Manoj Steels',
         image: newProduct.image || 'https://via.placeholder.com/150',
@@ -592,18 +884,27 @@ const AdminDashboard = ({ navigation }: any) => {
         category: newProduct.category
       };
       
-      // Call API
-      await cartService.apiAddProduct(product);
+      if (isEditingProduct && editingProductId) {
+        await cartService.apiUpdateProduct(editingProductId as string, productData);
+        Alert.alert('Success', 'Product updated successfully!');
+      } else {
+        const product = {
+          ...productData,
+          id: `PROD-${Date.now()}`,
+        };
+        await cartService.apiAddProduct(product);
+        Alert.alert('Success', 'Product added successfully!');
+      }
       
-      // Refresh list from server to get correct IDs etc.
       await cartService.apiFetchProducts();
       
       setShowAddProduct(false);
       setNewProduct({ name: '', brand: '', price: '', qty: '', image: '', category: 'Cement' });
-      Alert.alert('Success', 'Product added successfully!');
+      setIsEditingProduct(false);
+      setEditingProductId(null);
     } catch (e: any) {
-      console.error('Add Product Error:', e);
-      Alert.alert('Network Error', 'Failed to connect to the server. Please check if your API is running and try again.');
+      console.error('Add/Update Product Error:', e);
+      Alert.alert('Error', e.message || 'Failed to update product. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -810,17 +1111,71 @@ const AdminDashboard = ({ navigation }: any) => {
         </View>
       </View>
 
-      <View style={styles.tabBarContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
-          {['Orders', 'Tokens', 'Inventory', 'Receipt Options', 'Customers', 'Employees', 'Settings'].map((t) => (
-            <TouchableOpacity 
-              key={t} 
-              onPress={() => setActiveTab(t)}
-              style={[styles.tab, activeTab === t && styles.activeTab]}
-            >
-              <Text style={[styles.tabText, activeTab === t && styles.activeTabText]}>{t}</Text>
-            </TouchableOpacity>
-          ))}
+      <View style={{
+        marginVertical: 10,
+        marginHorizontal: 15,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 35,
+        paddingVertical: 8,
+        paddingHorizontal: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        elevation: 3,
+      }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 6, alignItems: 'center' }}>
+          {['Orders', 'Tokens', 'Categories', 'Inventory', 'Receipt Options', 'Accounts', 'Attendance', 'Fuel'].map((t) => {
+            const isActive = activeTab === t;
+            const iconColor = isActive ? '#FFFFFF' : '#4B5563';
+            const iconSize = 18;
+            let iconComponent = <Package size={iconSize} color={iconColor} />;
+            
+            if (t === 'Orders') iconComponent = <ShoppingCart size={iconSize} color={iconColor} />;
+            else if (t === 'Tokens') iconComponent = <Ticket size={iconSize} color={iconColor} />;
+            else if (t === 'Categories') iconComponent = <LayoutGrid size={iconSize} color={iconColor} />;
+            else if (t === 'Inventory') iconComponent = <Package size={iconSize} color={iconColor} />;
+            else if (t === 'Receipt Options') iconComponent = <Receipt size={iconSize} color={iconColor} />;
+            else if (t === 'Accounts') iconComponent = <Users size={iconSize} color={iconColor} />;
+            else if (t === 'Attendance') iconComponent = <ClipboardCheck size={iconSize} color={iconColor} />;
+            else if (t === 'Fuel') iconComponent = <Truck size={iconSize} color={iconColor} />;
+
+            return (
+              <TouchableOpacity 
+                key={t} 
+                onPress={() => setActiveTab(t)}
+                style={{
+                  alignItems: 'center',
+                  marginHorizontal: 8,
+                  minWidth: 58,
+                }}
+              >
+                <View style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  backgroundColor: isActive ? '#1E78FF' : '#F3F4F6',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  shadowColor: isActive ? '#1E78FF' : '#000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: isActive ? 0.2 : 0.03,
+                  shadowRadius: 4,
+                  elevation: isActive ? 4 : 1,
+                }}>
+                  {iconComponent}
+                </View>
+                <Text style={{
+                  fontSize: 10,
+                  marginTop: 4,
+                  fontWeight: isActive ? 'bold' : '600',
+                  color: isActive ? '#1E78FF' : '#4B5563',
+                }}>
+                  {t === 'Receipt Options' ? 'Receipts' : t}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -842,7 +1197,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   </View>
                   <View style={styles.priceInputMiniWrapper}>
                     <Text style={styles.currencySymbolMini}>₹</Text>
-                    <TextInput
+                    <TextInput placeholderTextColor={Colors.textSecondary}
                       style={styles.priceInputMini}
                       value={item.price?.toString() === '0' ? '' : item.price?.toString() || ''}
                       onChangeText={(val) => {
@@ -879,7 +1234,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   try {
                     // Update price in the backend
                     const fixedItems = tempItems.map(i => ({...i, price: parseFloat(i.price) || 0}));
-                    await cartService.apiFixPrice(editingOrderId, fixedItems);
+                    await cartService.apiFixPrice(editingOrderId as string, fixedItems);
                     
                     // Update local list
                     const updatedOrders = orderList.map(order => {
@@ -1054,7 +1409,7 @@ const AdminDashboard = ({ navigation }: any) => {
             {/* Modal Header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <View>
-                <Text style={styles.priceEditTitle}>✏️ Customize Order</Text>
+                <Text style={styles.priceEditTitle}>✏️ Edit Order</Text>
                 <Text style={[styles.priceEditSubtitle, { color: Colors.primary, fontWeight: 'bold' }]}>
                   Token: {customizingOrder?.id}
                 </Text>
@@ -1095,7 +1450,7 @@ const AdminDashboard = ({ navigation }: any) => {
               <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>🚛 Truck Number</Text>
               <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 48 }]}>
                 <Truck size={18} color={Colors.primary} style={{ marginRight: 8 }} />
-                <TextInput
+                <TextInput placeholderTextColor={Colors.textSecondary}
                   style={[styles.priceInputMini, { flex: 1, fontSize: 15 }]}
                   value={customTruckNo}
                   onChangeText={(t) => setCustomTruckNo(t.toUpperCase())}
@@ -1108,7 +1463,7 @@ const AdminDashboard = ({ navigation }: any) => {
               <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>📦 Number of Bags</Text>
               <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 48 }]}>
                 <Package size={18} color={Colors.primary} style={{ marginRight: 8 }} />
-                <TextInput
+                <TextInput placeholderTextColor={Colors.textSecondary}
                   style={[styles.priceInputMini, { flex: 1, fontSize: 15 }]}
                   value={customBags}
                   onChangeText={setCustomBags}
@@ -1121,7 +1476,7 @@ const AdminDashboard = ({ navigation }: any) => {
               <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>📍 Delivery Location</Text>
               <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 'auto', minHeight: 52, paddingVertical: 12, alignItems: 'flex-start' }]}>
                 <MapPin size={18} color={Colors.primary} style={{ marginRight: 8, marginTop: 2 }} />
-                <TextInput
+                <TextInput placeholderTextColor={Colors.textSecondary}
                   style={[styles.priceInputMini, { flex: 1, fontSize: 14, lineHeight: 20 }]}
                   value={customLocation}
                   onChangeText={setCustomLocation}
@@ -1135,7 +1490,7 @@ const AdminDashboard = ({ navigation }: any) => {
               <Text style={[styles.itemNameLabel, { marginBottom: 6 }]}>📅 Delivery Date</Text>
               <View style={[styles.priceInputMiniWrapper, { marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, width: '100%', height: 48 }]}>
                 <FileText size={18} color={Colors.primary} style={{ marginRight: 8 }} />
-                <TextInput
+                <TextInput placeholderTextColor={Colors.textSecondary}
                   style={[styles.priceInputMini, { flex: 1, fontSize: 15 }]}
                   value={customDeliveryDate}
                   onChangeText={setCustomDeliveryDate}
@@ -1275,36 +1630,141 @@ const AdminDashboard = ({ navigation }: any) => {
                   <Text style={{ color: Colors.error, fontWeight: 'bold' }}>Clear All</Text>
                 </TouchableOpacity>
               </View>
-              <View style={styles.filterRow}>
-                {['All', 'Pending', 'Completed', 'Today'].map((f) => (
-                  <TouchableOpacity 
-                    key={f} 
-                    onPress={() => setFilter(f)}
-                    style={[styles.filterBtn, filter === f && styles.filterBtnActive]}
-                  >
-                    <Text style={[styles.filterBtnText, filter === f && styles.filterBtnTextActive]}>
-                      {f === 'All' ? 'Recent' : f}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 35,
+                paddingVertical: 10,
+                paddingHorizontal: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.05,
+                shadowRadius: 10,
+                elevation: 3,
+                marginBottom: 20,
+              }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
+                  {['All', 'Pending', 'Completed', 'Today', 'Date'].map((f) => {
+                    const isActive = filter === f;
+                    const iconColor = isActive ? '#FFFFFF' : '#4B5563';
+                    const iconSize = 18;
+                    let iconComponent = <Clock size={iconSize} color={iconColor} />;
+                    
+                    if (f === 'All') iconComponent = <Clock size={iconSize} color={iconColor} />;
+                    else if (f === 'Pending') iconComponent = <RefreshCw size={iconSize} color={iconColor} />;
+                    else if (f === 'Completed') iconComponent = <CheckCircle2 size={iconSize} color={iconColor} />;
+                    else if (f === 'Today') iconComponent = <CalendarDays size={iconSize} color={iconColor} />;
+                    else if (f === 'Date') iconComponent = <CalendarDays size={iconSize} color={iconColor} />;
+
+                    return (
+                      <TouchableOpacity 
+                        key={f} 
+                        onPress={() => {
+                          setFilter(f);
+                          if (f === 'Date') {
+                            setShowOrderCalendar(true);
+                          }
+                        }}
+                        style={{
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          marginHorizontal: 8,
+                          minWidth: 62,
+                        }}
+                      >
+                        <View style={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: 19,
+                          backgroundColor: isActive ? '#1E78FF' : '#F3F4F6',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          shadowColor: isActive ? '#1E78FF' : '#000',
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: isActive ? 0.25 : 0.02,
+                          shadowRadius: 4,
+                          elevation: isActive ? 4 : 1,
+                        }}>
+                          {iconComponent}
+                        </View>
+                        <Text style={{
+                          fontSize: 10,
+                          marginTop: 4,
+                          fontWeight: isActive ? 'bold' : '600',
+                          color: isActive ? '#1E78FF' : '#4B5563',
+                        }}>
+                          {f === 'All' ? 'Recent' : (f === 'Date' && selectedOrderDate ? selectedOrderDate : f)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
+
+              {/* Interactive Order Calendar Modal */}
+              <Modal visible={showOrderCalendar} transparent animationType="fade">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                  <View style={{ width: '90%', backgroundColor: 'white', borderRadius: 16, overflow: 'hidden', padding: 10 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8 }}>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: Colors.text }}>Filter Orders by Date</Text>
+                      {selectedOrderDate ? (
+                        <TouchableOpacity 
+                          onPress={() => {
+                            setSelectedOrderDate('');
+                            setShowOrderCalendar(false);
+                            setFilter('All');
+                          }}
+                          style={{ backgroundColor: Colors.error + '22', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}
+                        >
+                          <Text style={{ color: Colors.error, fontSize: 12, fontWeight: 'bold' }}>Clear</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <Calendar
+                      onDayPress={(day: any) => {
+                        setSelectedOrderDate(day.dateString);
+                        setShowOrderCalendar(false);
+                      }}
+                      markedDates={selectedOrderDate ? { [selectedOrderDate]: { selected: true, selectedColor: '#1E78FF' } } : {}}
+                      theme={{
+                        selectedDayBackgroundColor: '#1E78FF',
+                        todayTextColor: '#1E78FF',
+                        arrowColor: '#1E78FF',
+                      }}
+                    />
+                    <TouchableOpacity 
+                      onPress={() => setShowOrderCalendar(false)} 
+                      style={{ padding: 14, alignItems: 'center', borderTopWidth: 1, borderColor: '#eee', marginTop: 10 }}
+                    >
+                      <Text style={{ color: Colors.primary, fontWeight: 'bold', fontSize: 16 }}>Close</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Modal>
               
               <FlatList
-                data={orderList.filter(o => {
-                  if (filter === 'All') return true;
-                  if (filter === 'Pending') return o.status === 'Pending' || o.status === 'PRICE_FIXED';
-                  if (filter === 'Completed') return o.status === 'Completed' || o.status === 'Delivered';
-                  
-                  const today = new Date().toLocaleDateString();
-                  if (filter === 'Today') return o.date === today;
-                  
-                  if (filter === 'Last Week') {
-                    const lastWeek = Date.now() - 7 * 24 * 60 * 60 * 1000;
-                    return o.createdAt && o.createdAt >= lastWeek;
-                  }
-                  
-                  return true;
-                })}
+                data={orderList
+                  .filter(o => {
+                    if (filter === 'All') return true;
+                    if (filter === 'Pending') return o.status === 'Pending' || o.status === 'PRICE_FIXED';
+                    if (filter === 'Completed') return o.status === 'Completed' || o.status === 'Delivered';
+                    
+                    const today = new Date().toLocaleDateString();
+                    if (filter === 'Today') return o.date === today;
+                    
+                    if (filter === 'Date') {
+                      return !selectedOrderDate || o.date === new Date(selectedOrderDate).toLocaleDateString();
+                    }
+                    
+                    return true;
+                  })
+                  .sort((a, b) => {
+                    const idA = parseInt(String(a.id).replace(/\D/g, '') || '0');
+                    const idB = parseInt(String(b.id).replace(/\D/g, '') || '0');
+                    return idB - idA;
+                  })
+                }
                 renderItem={renderOrder}
                 keyExtractor={(item) => item.id}
                 scrollEnabled={false}
@@ -1315,17 +1775,53 @@ const AdminDashboard = ({ navigation }: any) => {
           <View style={styles.section}>
             <Text style={[Typography.h3, styles.sectionTitle]}>Token Management</Text>
             
-            <View style={styles.brandManageCard}>
-              <Text style={[styles.inputLabel, { marginBottom: 10 }]}>Manage Selectable Brands</Text>
-              <View style={styles.brandInputRow}>
+            <View style={{
+              backgroundColor: '#FFFFFF',
+              padding: 20,
+              borderRadius: 24,
+              borderWidth: 1,
+              borderColor: '#E5E7EB',
+              marginBottom: 20,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.04,
+              shadowRadius: 16,
+              elevation: 2,
+            }}>
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: Colors.text, marginBottom: 12 }}>Manage Selectable Brands</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                 <TextInput 
-                  style={[styles.adminInput, { flex: 1, marginRight: 10 }]}
+                  placeholderTextColor={Colors.textSecondary} 
+                  style={{
+                    flex: 1,
+                    height: 48,
+                    backgroundColor: '#F9FAFB',
+                    borderRadius: 14,
+                    paddingHorizontal: 16,
+                    color: Colors.black,
+                    borderWidth: 1,
+                    borderColor: '#E5E7EB',
+                    fontSize: 14,
+                    marginRight: 10,
+                  }}
                   placeholder="New Brand (e.g. Dalmia Cement)"
                   value={newBrandName}
                   onChangeText={setNewBrandName}
                 />
                 <TouchableOpacity 
-                  style={styles.brandAddBtn}
+                  style={{
+                    backgroundColor: Colors.primary,
+                    height: 48,
+                    paddingHorizontal: 20,
+                    borderRadius: 14,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: Colors.primary,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 8,
+                    elevation: 3,
+                  }}
                   onPress={() => {
                     if (newBrandName.trim()) {
                       cartService.addBrand(newBrandName.trim());
@@ -1333,35 +1829,157 @@ const AdminDashboard = ({ navigation }: any) => {
                     }
                   }}
                 >
-                  <Text style={styles.brandAddBtnText}>Add</Text>
+                  <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 14 }}>Add</Text>
                 </TouchableOpacity>
               </View>
               
-              <View style={styles.brandChipContainer}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {brandList.map((brand) => (
-                  <View key={brand} style={styles.brandChip}>
-                    <Text style={styles.brandChipText}>{brand}</Text>
-                    <TouchableOpacity onPress={() => cartService.removeBrand(brand)}>
-                      <X size={14} color={Colors.error} style={{ marginLeft: 8 }} />
+                  <View 
+                    key={brand} 
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: '#F3F4F6',
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 20,
+                      borderWidth: 1,
+                      borderColor: '#E5E7EB',
+                    }}
+                  >
+                    <Text style={{ color: '#374151', fontSize: 13, fontWeight: '600' }}>{brand}</Text>
+                    <TouchableOpacity 
+                      onPress={() => cartService.removeBrand(brand)}
+                      style={{
+                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                        borderRadius: 10,
+                        padding: 3,
+                        marginLeft: 8,
+                      }}
+                    >
+                      <X size={10} color={Colors.error} />
                     </TouchableOpacity>
                   </View>
                 ))}
               </View>
             </View>
 
-            {bulkOrderList.length === 0 ? (
-              <View style={styles.emptyAdminState}>
-                <Truck size={48} color={Colors.border} />
-                <Text style={styles.emptyAdminText}>No bulk orders yet</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={bulkOrderList}
-                renderItem={renderBulkOrder}
-                keyExtractor={(item) => item.id}
-                scrollEnabled={false}
-              />
-            )}
+            {/* Token Filter Tabs */}
+            {(() => {
+              const today = new Date().toLocaleDateString();
+              const todayCount    = bulkOrderList.filter(o => o.date === today).length;
+              const cancelCount   = bulkOrderList.filter(o => o.status === 'Cancelled').length;
+              const completeCount = bulkOrderList.filter(o => o.status === 'Delivered' || o.status === 'Completed').length;
+              const allCount      = bulkOrderList.length;
+
+              const tabs: Array<{key: 'All' | "Today's" | 'Cancelled' | 'Completed'; label: string; count: number; color: string; bg: string}> = [
+                { key: 'All',       label: 'All Orders',    count: allCount,      color: Colors.primary, bg: 'rgba(24,119,242,0.1)' },
+                { key: "Today's",   label: "Today's",       count: todayCount,    color: '#FF9800',       bg: 'rgba(255,152,0,0.1)' },
+                { key: 'Cancelled', label: 'Cancelled',     count: cancelCount,   color: Colors.error,    bg: 'rgba(220,53,69,0.1)' },
+                { key: 'Completed', label: 'Completed',     count: completeCount, color: Colors.success,  bg: 'rgba(40,167,69,0.1)' },
+              ];
+
+              return (
+                <View style={{ marginTop: 16, marginBottom: 4 }}>
+                  {/* Tab Row */}
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                    {tabs.map(tab => {
+                      const active = tokenFilter === tab.key;
+                      return (
+                        <TouchableOpacity
+                          key={tab.key}
+                          onPress={() => { setTokenFilter(tab.key); setSelectedTokenDate(''); }}
+                          style={{
+                            flex: 1,
+                            minWidth: '45%',
+                            paddingVertical: 10,
+                            paddingHorizontal: 12,
+                            borderRadius: 12,
+                            backgroundColor: active ? tab.color : tab.bg,
+                            borderWidth: 1.5,
+                            borderColor: tab.color,
+                            alignItems: 'center',
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: active ? Colors.white : tab.color }}>{tab.label}</Text>
+                          <View style={{ backgroundColor: active ? 'rgba(255,255,255,0.3)' : tab.color, borderRadius: 20, minWidth: 24, paddingHorizontal: 6, paddingVertical: 2, alignItems: 'center' }}>
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: Colors.white }}>{tab.count}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {/* Date picker row (only show for All / Today) */}
+                  {(tokenFilter === 'All' || tokenFilter === "Today's") && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 10 }}>
+                      <TouchableOpacity onPress={() => setShowTokenCalendar(!showTokenCalendar)} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={{ color: Colors.primary, marginRight: 5, fontWeight: 'bold', fontSize: 13 }}>
+                          {selectedTokenDate ? new Date(selectedTokenDate).toLocaleDateString() : 'Filter by Date'}
+                        </Text>
+                        {selectedTokenDate ? (
+                          <TouchableOpacity onPress={() => setSelectedTokenDate('')}>
+                            <X size={18} color={Colors.error} />
+                          </TouchableOpacity>
+                        ) : (
+                          <CalendarDays size={18} color={Colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {showTokenCalendar && (
+                    <View style={{ marginBottom: 15, borderRadius: 10, overflow: 'hidden', backgroundColor: Colors.white, elevation: 2 }}>
+                      <Calendar
+                        onDayPress={(day: any) => {
+                          setSelectedTokenDate(day.dateString);
+                          setShowTokenCalendar(false);
+                        }}
+                        markedDates={{ [selectedTokenDate]: { selected: true, selectedColor: Colors.primary } }}
+                        theme={{ todayTextColor: Colors.primary, selectedDayBackgroundColor: Colors.primary, arrowColor: Colors.primary }}
+                      />
+                    </View>
+                  )}
+
+                  {/* Filtered List */}
+                  {(() => {
+                    const todayStr = new Date().toLocaleDateString();
+                    const filtered = bulkOrderList
+                      .filter(o => {
+                        if (tokenFilter === "Today's")  return o.date === todayStr;
+                        if (tokenFilter === 'Cancelled') return o.status === 'Cancelled';
+                        if (tokenFilter === 'Completed') return o.status === 'Delivered' || o.status === 'Completed';
+                        // All — apply optional date filter
+                        return !selectedTokenDate || o.date === new Date(selectedTokenDate).toLocaleDateString();
+                      })
+                      .sort((a, b) => {
+                        const idA = parseInt(String(a.id).replace(/\D/g, '') || '0');
+                        const idB = parseInt(String(b.id).replace(/\D/g, '') || '0');
+                        return idB - idA;
+                      });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <View style={styles.emptyAdminState}>
+                          <Truck size={48} color={Colors.border} />
+                          <Text style={styles.emptyAdminText}>No orders found</Text>
+                        </View>
+                      );
+                    }
+
+                    return (
+                      <ActiveTokensList 
+                        bulkOrderList={filtered} 
+                        onRefresh={onRefresh} 
+                      />
+                    );
+                  })()}
+                </View>
+              );
+            })()}
           </View>
         ) : activeTab === 'Receipt Options' ? (
           <View style={styles.section}>
@@ -1495,7 +2113,7 @@ const AdminDashboard = ({ navigation }: any) => {
               
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Business Name</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={styles.adminInput}
                   value={rBusinessName}
                   onChangeText={setRBusinessName}
@@ -1505,7 +2123,7 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Contact Phone Number</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={styles.adminInput}
                   value={rPhone}
                   onChangeText={setRPhone}
@@ -1516,7 +2134,7 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Business Address</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={styles.adminInput}
                   value={rAddress}
                   onChangeText={setRAddress}
@@ -1544,7 +2162,7 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Terms & Conditions Note</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={styles.adminInput}
                   value={rTerms}
                   onChangeText={setRTerms}
@@ -1554,7 +2172,7 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Footer Branding Text</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={styles.adminInput}
                   value={rFooterBranding}
                   onChangeText={setRFooterBranding}
@@ -1635,12 +2253,12 @@ const AdminDashboard = ({ navigation }: any) => {
                     <Text style={{ marginLeft: 4, fontWeight: 'bold', color: '#128C7E', fontSize: 14 }}>+91</Text>
                   </View>
                   <TextInput
+                    placeholderTextColor={Colors.textSecondary}
                     style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: Colors.text }}
                     value={rWhatsappNumber}
                     onChangeText={(t) => setRWhatsappNumber(t.replace(/\D/g, '').slice(0, 10))}
                     keyboardType="phone-pad"
                     placeholder="9876543210"
-                    placeholderTextColor={Colors.textSecondary}
                     maxLength={10}
                   />
                 </View>
@@ -1656,7 +2274,7 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Customer Name</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={styles.adminInput}
                   value={reminderCustomerName}
                   onChangeText={setReminderCustomerName}
@@ -1673,12 +2291,12 @@ const AdminDashboard = ({ navigation }: any) => {
                     <Text style={{ marginLeft: 4, fontWeight: 'bold', color: Colors.text, fontSize: 14 }}>+91</Text>
                   </View>
                   <TextInput
+                    placeholderTextColor={Colors.textSecondary}
                     style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: Colors.text }}
                     value={reminderCustomerPhone}
                     onChangeText={(t) => setReminderCustomerPhone(t.replace(/\D/g, '').slice(0, 10))}
                     keyboardType="phone-pad"
                     placeholder="9876543210"
-                    placeholderTextColor={Colors.textSecondary}
                     maxLength={10}
                   />
                 </View>
@@ -1691,7 +2309,7 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.inputLabel}>Balance Amount Due (₹)</Text>
-                <TextInput 
+                <TextInput placeholderTextColor={Colors.textSecondary} 
                   style={[styles.adminInput, { color: '#E53935', fontWeight: 'bold' }]}
                   value={reminderBalance}
                   onChangeText={setReminderBalance}
@@ -1760,9 +2378,9 @@ const AdminDashboard = ({ navigation }: any) => {
                       title: 'Payment Reminder',
                       message: message,
                       url: uri,
-                      social: Share.Social.WHATSAPP,
+                      social: Share.Social.WHATSAPP as any,
                       whatsAppNumber: phone, // Android directly opens chat with this number
-                    }).catch((err) => {
+                    } as any).catch((err) => {
                       // Fallback if share fails (e.g., WhatsApp not installed)
                       Linking.openURL(url).catch(() => {
                         Alert.alert('Error', 'Could not open WhatsApp.');
@@ -1788,299 +2406,244 @@ const AdminDashboard = ({ navigation }: any) => {
               </View>
             </View>
           </View>
-        ) : activeTab === 'Customers' ? (
-          <View style={styles.section}>
-            <Text style={[Typography.h3, styles.sectionTitle]}>Customer Management</Text>
-            
-            <View style={[styles.brandManageCard, { marginTop: 10 }]}>
-              <Text style={[styles.inputLabel, { fontSize: 16, marginBottom: 15, color: Colors.primary }]}>Create Regular Customer Account</Text>
-              
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Full Name</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={newCustomerName}
-                  onChangeText={setNewCustomerName}
-                  placeholder="e.g. Ramesh Kumar"
-                />
+        ) : activeTab === 'Categories' ? (
+          <ScrollView style={styles.sectionContainer} showsVerticalScrollIndicator={false}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>Manage Categories</Text>
               </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Phone Number (User ID)</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={newCustomerPhone}
-                  onChangeText={(t) => setNewCustomerPhone(t.replace(/\D/g, '').slice(0, 10))}
-                  keyboardType="phone-pad"
-                  placeholder="e.g. 9876543210"
-                  maxLength={10}
-                />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Password</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={newCustomerPassword}
-                  onChangeText={setNewCustomerPassword}
-                  placeholder="Enter password"
-                  secureTextEntry={true}
-                />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Address (Optional)</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={newCustomerAddress}
-                  onChangeText={setNewCustomerAddress}
-                  placeholder="Enter full address"
-                />
-              </View>
-
-              <TouchableOpacity 
-                style={[styles.saveProductBtn, { marginTop: 15 }]}
-                onPress={async () => {
-                  if (!newCustomerName || !newCustomerPhone || !newCustomerPassword) {
-                    Alert.alert('Missing Info', 'Please provide name, phone, and password.');
-                    return;
-                  }
-                  
-                  if (newCustomerPhone.length < 10) {
-                    Alert.alert('Invalid Phone', 'Phone number must be at least 10 digits.');
-                    return;
-                  }
-
-                  setLoading(true);
-                  try {
-                    await authService.adminCreateUser({
-                      name: newCustomerName.trim(),
-                      phone: newCustomerPhone.trim(),
-                      password: newCustomerPassword.trim(),
-                      address: newCustomerAddress.trim()
-                    });
-                    
-                    Alert.alert('Success', 'Customer account created successfully!');
-                    setNewCustomerName('');
-                    setNewCustomerPhone('');
-                    setNewCustomerPassword('');
-                    setNewCustomerAddress('');
-                  } catch (e: any) {
-                    Alert.alert('Error', e.message || 'Failed to create user.');
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-              >
-                {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.saveProductText}>Create Customer Account</Text>}
-              </TouchableOpacity>
             </View>
-          </View>
-        ) : activeTab === 'Employees' ? (
-          <View style={styles.tabContent}>
-            <Text style={styles.sectionTitle}>Employee Management</Text>
-            
-            {/* Create New Employee */}
-            <View style={styles.brandManageCard}>
-              <Text style={[styles.inputLabel, { fontSize: 16, marginBottom: 15, color: Colors.primary }]}>
-                {editingEmployeeId ? 'Edit Employee Credential' : 'Create Employee Credential'}
-              </Text>
+            <View style={styles.addCategoryCard}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>New Category Name</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} 
+                  style={styles.input} 
+                  value={newCategoryName} 
+                  onChangeText={setNewCategoryName} 
+                  placeholder="Enter Category" 
+                />
+              </View>
               
               <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Employee ID / Mobile Number</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={newEmpMobile}
-                  onChangeText={setNewEmpMobile}
-                  placeholder="e.g. EMP001 or 9876543210"
-                />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Employee Password</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={newEmpPassword}
-                  onChangeText={setNewEmpPassword}
-                  placeholder="Password"
-                  secureTextEntry
-                />
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity 
-                  style={[styles.saveProductBtn, { marginTop: 15, flex: 1, backgroundColor: editingEmployeeId ? Colors.accent : Colors.primary }]}
-                  onPress={async () => {
-                    if(!newEmpMobile.trim() || !newEmpPassword.trim()) {
-                      Alert.alert('Error', 'Please enter both ID/Mobile and Password');
-                      return;
-                    }
-                    if (editingEmployeeId) {
-                      const success = await authService.updateEmployee(editingEmployeeId, { mobile: newEmpMobile.trim(), password: newEmpPassword.trim() });
-                      if(success) {
-                        Alert.alert('Success', 'Employee updated successfully');
-                        setNewEmpMobile('');
-                        setNewEmpPassword('');
-                        setEditingEmployeeId(null);
-                      } else {
-                        Alert.alert('Error', 'Could not update employee');
-                      }
-                    } else {
-                      const success = await authService.addEmployee({ mobile: newEmpMobile.trim(), password: newEmpPassword.trim() });
-                      if(success) {
-                        Alert.alert('Success', 'Employee created successfully');
-                        setNewEmpMobile('');
-                        setNewEmpPassword('');
-                      } else {
-                        Alert.alert('Error', 'Could not create employee');
-                      }
-                    }
-                  }}
-                >
-                  <Text style={styles.saveProductText}>{editingEmployeeId ? 'Update Employee' : 'Create Employee'}</Text>
-                </TouchableOpacity>
-
-                {editingEmployeeId && (
+                <Text style={styles.inputLabel}>Category Image</Text>
+                {newCategoryImage ? (
+                  <View style={styles.imagePreviewContainer}>
+                    <Image source={{ uri: newCategoryImage }} style={styles.imagePreview} />
+                    <TouchableOpacity 
+                      style={styles.changeImageBtn}
+                      onPress={pickCategoryImage}
+                    >
+                      <Text style={styles.changeImageText}>Change Image</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
                   <TouchableOpacity 
-                    style={[styles.saveProductBtn, { marginTop: 15, backgroundColor: Colors.error }]}
-                    onPress={() => {
-                      setEditingEmployeeId(null);
-                      setNewEmpMobile('');
-                      setNewEmpPassword('');
-                    }}
+                    style={styles.uploadBtn}
+                    onPress={pickCategoryImage}
                   >
-                    <Text style={styles.saveProductText}>Cancel</Text>
+                    <ShoppingBag size={24} color={Colors.primary} />
+                    <Text style={styles.uploadBtnText}>Upload from Gallery</Text>
                   </TouchableOpacity>
                 )}
               </View>
+
+              <TouchableOpacity style={styles.addCategoryBtn} onPress={handleAddCategory} disabled={isAddingCategory}>
+                {isAddingCategory ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.addCategoryBtnText}>Add Category</Text>}
+              </TouchableOpacity>
             </View>
 
-            {/* List Employees */}
-            <Text style={[styles.sectionTitle, { marginTop: 25 }]}>Registered Employees</Text>
-            {localEmployees.length === 0 ? (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Existing Categories</Text>
+            </View>
+            
+            {dynamicCategories.length === 0 ? (
               <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No employees registered yet.</Text>
+                <Text style={styles.emptyText}>No categories found.</Text>
               </View>
             ) : (
-              localEmployees.map((emp: any) => (
-                <View key={emp.id} style={styles.customerCard}>
+              dynamicCategories.map(cat => (
+                <View key={cat.id} style={[styles.customerCard, { alignItems: 'center' }]}>
+                  {cat.image ? (
+                    <Image source={{uri: cat.image.startsWith('http') ? cat.image : `https://api.codingboss.in${cat.image}`}} style={{width: 50, height: 50, borderRadius: 25, marginRight: 15}} />
+                  ) : (
+                    <View style={{width: 50, height: 50, borderRadius: 25, backgroundColor: Colors.border, marginRight: 15, alignItems: 'center', justifyContent: 'center'}}>
+                       <Text style={{color: '#999', fontSize: 10}}>No Img</Text>
+                    </View>
+                  )}
                   <View style={styles.customerInfo}>
-                    <Text style={styles.customerName}>ID / Mobile: {emp.mobile}</Text>
-                    <Text style={styles.customerPhone}>Password: {emp.password}</Text>
+                    <Text style={styles.customerName}>{cat.name}</Text>
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <TouchableOpacity 
-                      style={[styles.deleteBtn, { backgroundColor: '#E3F2FD' }]}
-                      onPress={() => {
-                        setEditingEmployeeId(emp.id);
-                        setNewEmpMobile(emp.mobile);
-                        setNewEmpPassword(emp.password);
-                      }}
-                    >
-                      <Text style={{ fontSize: 16 }}>✏️</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.deleteBtn}
-                      onPress={() => {
-                        Alert.alert('Delete Employee', `Are you sure you want to delete ${emp.mobile}?`, [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: () => authService.deleteEmployee(emp.id) }
-                        ]);
-                      }}
-                    >
-                      <Trash2 size={20} color={Colors.error} />
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity 
+                    style={[styles.deleteBtn, { backgroundColor: Colors.error }]}
+                    onPress={() => handleDeleteCategory(String(cat.id))}
+                  >
+                    <Trash2 size={16} color={Colors.white} />
+                  </TouchableOpacity>
                 </View>
               ))
             )}
-          </View>
-        ) : activeTab === 'Settings' ? (
-          <View style={styles.section}>
-            <Text style={[Typography.h3, styles.sectionTitle]}>Admin Account Settings</Text>
+            <View style={{height: 100}} />
+          </ScrollView>
+        ) : activeTab === 'Accounts' ? (
+          <ScrollView style={styles.sectionContainer} showsVerticalScrollIndicator={false}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Users size={24} color={Colors.primary} />
+                <Text style={styles.sectionTitle}>Create Account</Text>
+              </View>
+            </View>
             
-            <View style={styles.brandManageCard}>
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Admin Mobile Number</Text>
-                <TextInput 
-                  style={styles.adminInput}
-                  value={tempAdminMobile}
-                  onChangeText={setTempAdminMobile}
-                  keyboardType="numeric"
-                  placeholder="Enter new admin mobile"
-                />
+            <View style={styles.addCategoryCard}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Name</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} style={styles.input} value={accName} onChangeText={setAccName} placeholder="Enter Name" />
               </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.inputLabel}>Admin Password</Text>
-                <View style={styles.passwordInputContainer}>
-                  <TextInput 
-                    style={[styles.adminInput, { flex: 1, borderBottomWidth: 0 }]}
-                    value={tempAdminPassword}
-                    onChangeText={setTempAdminPassword}
-                    secureTextEntry={!showAdminPassword}
-                    placeholder="Enter new admin password"
-                  />
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Phone Number</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} style={styles.input} value={accPhone} onChangeText={setAccPhone} placeholder="Enter Phone" keyboardType="phone-pad" />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Password</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} style={styles.input} value={accPassword} onChangeText={setAccPassword} placeholder="Enter Password" />
+              </View>
+              
+              <Text style={styles.inputLabel}>Role</Text>
+              <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
+                {['employee', 'customer', 'admin'].map(role => (
                   <TouchableOpacity 
-                    onPress={() => setShowAdminPassword(!showAdminPassword)}
-                    style={styles.eyeBtn}
+                    key={role} 
+                    style={[styles.roleChip, accRole === role && styles.roleChipActive]}
+                    onPress={() => setAccRole(role)}
                   >
-                    {showAdminPassword ? <EyeOff size={20} color={Colors.textSecondary} /> : <Eye size={20} color={Colors.textSecondary} />}
+                    <Text style={[styles.roleChipText, accRole === role && styles.roleChipTextActive]}>
+                      {role.charAt(0).toUpperCase() + role.slice(1)}
+                    </Text>
                   </TouchableOpacity>
-                </View>
+                ))}
               </View>
 
-              <TouchableOpacity 
-                style={[styles.saveProductBtn, { marginTop: 10 }]}
-                onPress={async () => {
-                  const success = await authService.updateAdminCredentials(tempAdminMobile, tempAdminPassword);
-                  if (success) {
-                    Alert.alert('Success', 'Admin credentials updated successfully.');
-                  } else {
-                    Alert.alert('Error', 'Failed to update credentials.');
-                  }
-                }}
-              >
-                <Text style={styles.saveProductText}>Update Credentials</Text>
+              <TouchableOpacity style={styles.addCategoryBtn} onPress={handleCreateAccount} disabled={isCreatingAccount}>
+                {isCreatingAccount ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.addCategoryBtnText}>Create Account</Text>}
               </TouchableOpacity>
             </View>
 
-              <TouchableOpacity 
-                style={[styles.logoutBtn, { marginTop: 20, backgroundColor: 'rgba(250, 56, 62, 0.05)' }]}
-                onPress={() => {
-                  Alert.alert(
-                    'Clear All Products',
-                    'This will permanently delete ALL products in the New Arrivals/Others section. This cannot be undone. Continue?',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { 
-                        text: 'Clear All', 
-                        style: 'destructive',
-                        onPress: () => {
-                          cartService.clearProducts();
-                          Alert.alert('Success', 'Inventory cleared.');
-                        }
-                      }
-                    ]
-                  );
-                }}
-              >
-                <Trash2 size={22} color={Colors.error} />
-                <Text style={styles.logoutText}>Clear All Products</Text>
-              </TouchableOpacity>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Registered Accounts</Text>
+            </View>
+            
+            <View style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 35,
+              paddingVertical: 10,
+              paddingHorizontal: 8,
+              flexDirection: 'row',
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.05,
+              shadowRadius: 10,
+              elevation: 3,
+              marginBottom: 20,
+              marginTop: 5,
+            }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
+                {['All', 'Customer', 'Employee', 'Admin'].map((f) => {
+                  const isActive = accountsFilter === f;
+                  const iconColor = isActive ? '#FFFFFF' : '#4B5563';
+                  const iconSize = 18;
+                  let iconComponent = <Users size={iconSize} color={iconColor} />;
+                  
+                  if (f === 'All') iconComponent = <Users size={iconSize} color={iconColor} />;
+                  else if (f === 'Customer') iconComponent = <ShoppingBag size={iconSize} color={iconColor} />;
+                  else if (f === 'Employee') iconComponent = <ClipboardCheck size={iconSize} color={iconColor} />;
+                  else if (f === 'Admin') iconComponent = <Eye size={iconSize} color={iconColor} />;
 
-              <TouchableOpacity 
-                style={[styles.logoutBtn, { marginTop: 20 }]}
-                onPress={() => {
-                  authService.logout();
-                  navigation.replace('Login');
-                }}
-              >
-                <LogOut size={22} color={Colors.error} />
-                <Text style={styles.logoutText}>Logout from Admin Panel</Text>
-              </TouchableOpacity>
-          </View>
-        ) : (
+                  return (
+                    <TouchableOpacity 
+                      key={f} 
+                      onPress={() => setAccountsFilter(f)}
+                      style={{
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        marginHorizontal: 8,
+                        minWidth: 65,
+                      }}
+                    >
+                      <View style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 19,
+                        backgroundColor: isActive ? '#1E78FF' : '#F3F4F6',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        shadowColor: isActive ? '#1E78FF' : '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: isActive ? 0.25 : 0.02,
+                        shadowRadius: 4,
+                        elevation: isActive ? 4 : 1,
+                      }}>
+                        {iconComponent}
+                      </View>
+                      <Text style={{
+                        fontSize: 10,
+                        marginTop: 4,
+                        fontWeight: isActive ? 'bold' : '600',
+                        color: isActive ? '#1E78FF' : '#4B5563',
+                      }}>
+                        {f}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {accountsList.filter(acc => accountsFilter === 'All' || (acc.role || 'user').toLowerCase() === accountsFilter.toLowerCase()).length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No accounts found.</Text>
+              </View>
+            ) : (
+              accountsList.filter(acc => accountsFilter === 'All' || (acc.role || 'user').toLowerCase() === accountsFilter.toLowerCase()).map(acc => (
+                <View key={acc.id} style={styles.customerCard}>
+                  <View style={styles.customerInfo}>
+                    <Text style={styles.customerName}>{acc.name || acc.phone}</Text>
+                    <Text style={styles.customerPhone}>{acc.phone}</Text>
+                    <Text style={{color: Colors.primary, fontSize: 12, marginTop: 4, fontWeight: 'bold'}}>{(acc.role || 'user').toUpperCase()}</Text>
+                  </View>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      Alert.alert('Confirm Delete', 'Are you sure you want to delete this account?', [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: async () => {
+                            try {
+                              // Optimistic delete from UI
+                              setAccountsList(prev => prev.filter(a => a.id !== acc.id));
+                              
+                              const role = (acc.role || 'user').toLowerCase();
+                              if (role === 'customer') {
+                                await authService.apiDeleteCustomer(acc.id);
+                              } else if (role === 'employee') {
+                                await authService.apiDeleteEmployee(acc.id);
+                              } else {
+                                await authService.apiDeleteUser(acc.id);
+                              }
+                            } catch(e) {
+                              console.log('Delete API error, but removed locally', e);
+                            }
+                          } 
+                        }
+                      ]);
+                    }} 
+                    style={styles.deleteBtn}
+                  >
+                    <Trash2 size={20} color={Colors.error} />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+            <View style={{height: 100}} />
+          </ScrollView>
+        ) : activeTab === 'Inventory' ? (
           <View style={styles.section}>
              <View style={styles.sectionHeaderRow}>
                 <Text style={[Typography.h3, styles.sectionTitle]}>Inventory Management</Text>
@@ -2088,6 +2651,9 @@ const AdminDashboard = ({ navigation }: any) => {
                   style={styles.addItemBtn}
                   onPress={() => {
                     console.log('Opening Add Product Modal');
+                    setIsEditingProduct(false);
+                    setEditingProductId(null);
+                    setNewProduct({ name: '', brand: '', price: '', qty: '', image: '', category: 'Cement' });
                     setShowAddProduct(true);
                   }}
                 >
@@ -2100,7 +2666,7 @@ const AdminDashboard = ({ navigation }: any) => {
                <View style={styles.modalOverlay}>
                  <View style={styles.fullScreenModal}>
                    <View style={[styles.receiptHeader, { backgroundColor: Colors.primary, padding: 20, marginBottom: 15 }]}>
-                     <Text style={[styles.receiptBrand, { color: Colors.white }]}>Add New Product</Text>
+                     <Text style={[styles.receiptBrand, { color: Colors.white }]}>{isEditingProduct ? 'Edit Product' : 'Add New Product'}</Text>
                      <TouchableOpacity onPress={() => setShowAddProduct(false)}>
                        <X size={24} color={Colors.white} />
                      </TouchableOpacity>
@@ -2191,7 +2757,7 @@ const AdminDashboard = ({ navigation }: any) => {
                        style={styles.saveProductBtn}
                        onPress={handleAddProduct}
                      >
-                       {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.saveProductText}>Save Product</Text>}
+                       {loading ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.saveProductText}>{isEditingProduct ? 'Save Changes' : 'Save Product'}</Text>}
                      </TouchableOpacity>
                      <View style={{ height: 40 }} />
                    </ScrollView>
@@ -2236,7 +2802,528 @@ const AdminDashboard = ({ navigation }: any) => {
               scrollEnabled={false}
             />
           </View>
+        ) : null}
+
+        {/* ─── Attendance Tab ─── */}
+        {activeTab === 'Attendance' && (
+          <View style={styles.section}>
+            <Text style={[Typography.h3, styles.sectionTitle]}>Attendance Reports</Text>
+
+            {attendanceLoading ? (
+              <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />
+            ) : (() => {
+              const ROLES = ['All', 'Manager', 'Supervisor', 'Accountants', 'Drivers', 'North Indians'];
+              const roleColors: Record<string, string> = {
+                All: Colors.primary,
+                Manager: '#7C3AED',
+                Supervisor: '#0891B2',
+                Accountants: '#059669',
+                Drivers: '#D97706',
+                'North Indians': '#DC2626',
+              };
+
+              // Filter by role (phone-based) — if no phones assigned yet, All shows all
+              const rolePhones = ROLE_PHONES[attendanceRole] || [];
+              const roleFiltered = attendanceRole === 'All'
+                ? attendanceList
+                : rolePhones.length > 0
+                  ? attendanceList.filter(r => rolePhones.includes(r.phone))
+                  : attendanceList; // show all if no mapping set
+                  
+              // Generate last 12 months dynamically for attendance
+              const allAttMonths = Array.from({length: 12}, (_, i) => {
+                const d = new Date();
+                d.setMonth(d.getMonth() - i);
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                return `${year}-${month}`;
+              });
+              const selectedAttMonth = attendanceMonthFilter || (allAttMonths.length > 0 ? allAttMonths[0] : '');
+
+              // Filter by selected month
+              const monthFiltered = roleFiltered.filter(r => {
+                let m = '';
+                if (r.date) {
+                  if (r.date.includes('-')) {
+                    const parts = r.date.split('-');
+                    if (parts[0].length === 4) m = `${parts[0]}-${parts[1]}`;
+                    else if (parts[2] && parts[2].length === 4) m = `${parts[2]}-${parts[1]}`;
+                    else m = r.date.slice(0, 7);
+                  } else m = r.date.slice(0, 7);
+                }
+                return m === selectedAttMonth;
+              });
+
+              // Filter by selected date
+              const dateFiltered = attendanceDateFilter
+                ? monthFiltered.filter(r => r.date === attendanceDateFilter)
+                : monthFiltered;
+
+              const statusColor = (s: string) => s === 'present' ? Colors.success : s === 'absent' ? Colors.error : '#FF9800';
+              const statusLabel = (s: string) => s === 'morning' ? 'Morning Shift' : s === 'afternoon' ? 'Afternoon Shift' : s.charAt(0).toUpperCase() + s.slice(1);
+
+              // Monthly summary: group all monthFiltered records by date for calendar markers
+              const dateMap: Record<string, {present: number; absent: number}> = {};
+              monthFiltered.forEach(r => {
+                if (!dateMap[r.date]) dateMap[r.date] = { present: 0, absent: 0 };
+                if (r.status === 'absent') dateMap[r.date].absent++;
+                else dateMap[r.date].present++;
+              });
+
+              // Calendar marked dates
+              const markedDates: Record<string, any> = {};
+              Object.entries(dateMap).forEach(([d, v]) => {
+                markedDates[d] = {
+                  marked: true,
+                  dotColor: v.absent > v.present ? Colors.error : Colors.success,
+                  selected: d === attendanceDateFilter,
+                  selectedColor: roleColors[attendanceRole],
+                };
+              });
+              if (attendanceDateFilter && !markedDates[attendanceDateFilter]) {
+                markedDates[attendanceDateFilter] = { selected: true, selectedColor: roleColors[attendanceRole] };
+              }
+
+              // Group filtered records by date
+              const grouped: Record<string, any[]> = {};
+              dateFiltered.forEach(r => {
+                if (!grouped[r.date]) grouped[r.date] = [];
+                grouped[r.date].push(r);
+              });
+              const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+
+              // Monthly stats (all dates for this role)
+              const totalPresent = Object.values(dateMap).reduce((s, v) => s + v.present, 0);
+              const totalAbsent  = Object.values(dateMap).reduce((s, v) => s + v.absent, 0);
+
+              return (
+                <>
+                  {/* Month Selection */}
+                  <View style={{ marginBottom: 15 }}>
+                    <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 8, fontWeight: '600' }}>Select Month</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowAttendanceMonthDropdown(true)}
+                      style={{
+                        paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12,
+                        backgroundColor: Colors.surface,
+                        borderWidth: 1, borderColor: Colors.border,
+                        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'
+                      }}
+                    >
+                      <Text style={{ color: Colors.text, fontWeight: '600', fontSize: 14 }}>
+                        {selectedAttMonth ? formatFuelMonth(selectedAttMonth) : 'Select a month'}
+                      </Text>
+                      <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>▼</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Role Category Tabs */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+                    {ROLES.map(role => {
+                      const active = attendanceRole === role;
+                      const col = roleColors[role];
+                      return (
+                        <TouchableOpacity
+                          key={role}
+                          onPress={() => { setAttendanceRole(role); setAttendanceDateFilter(''); setShowAttendanceCalendar(false); }}
+                          style={{
+                            paddingHorizontal: 16, paddingVertical: 9, borderRadius: 22, marginRight: 8,
+                            backgroundColor: active ? col : col + '18',
+                            borderWidth: 1.5, borderColor: col,
+                          }}
+                        >
+                          <Text style={{ color: active ? Colors.white : col, fontWeight: '700', fontSize: 13 }}>{role}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {/* Monthly Summary Stats */}
+                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                    <View style={{ flex: 1, backgroundColor: Colors.success + '18', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: Colors.success }}>
+                      <Text style={{ color: Colors.success, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' }}>Total Present</Text>
+                      <Text style={{ color: Colors.success, fontSize: 26, fontWeight: 'bold', marginTop: 2 }}>{totalPresent}</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: Colors.error + '18', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: Colors.error }}>
+                      <Text style={{ color: Colors.error, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' }}>Total Absent</Text>
+                      <Text style={{ color: Colors.error, fontSize: 26, fontWeight: 'bold', marginTop: 2 }}>{totalAbsent}</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: roleColors[attendanceRole] + '18', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: roleColors[attendanceRole] }}>
+                      <Text style={{ color: roleColors[attendanceRole], fontSize: 11, fontWeight: '600', textTransform: 'uppercase' }}>Days Recorded</Text>
+                      <Text style={{ color: roleColors[attendanceRole], fontSize: 26, fontWeight: 'bold', marginTop: 2 }}>{Object.keys(dateMap).length}</Text>
+                    </View>
+                  </View>
+
+                  {/* Calendar Picker */}
+                  <TouchableOpacity
+                    onPress={() => setShowAttendanceCalendar(!showAttendanceCalendar)}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                      backgroundColor: Colors.surface, borderRadius: 12, padding: 14,
+                      borderWidth: 1, borderColor: Colors.border, marginBottom: 10,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <CalendarDays size={20} color={roleColors[attendanceRole]} />
+                      <Text style={{ fontWeight: '600', color: Colors.text, fontSize: 14 }}>
+                        {attendanceDateFilter ? attendanceDateFilter : 'Select Date to Filter'}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {attendanceDateFilter ? (
+                        <TouchableOpacity
+                          onPress={(e) => { e.stopPropagation?.(); setAttendanceDateFilter(''); setShowAttendanceCalendar(false); }}
+                          style={{ backgroundColor: Colors.error + '22', borderRadius: 20, padding: 4 }}
+                        >
+                          <X size={16} color={Colors.error} />
+                        </TouchableOpacity>
+                      ) : null}
+                      <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>{showAttendanceCalendar ? '▲' : '▼'}</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {showAttendanceCalendar && (
+                    <View style={{ borderRadius: 14, overflow: 'hidden', marginBottom: 14, elevation: 3, backgroundColor: Colors.white }}>
+                      <Calendar
+                        onDayPress={(day: any) => {
+                          setAttendanceDateFilter(day.dateString);
+                          setShowAttendanceCalendar(false);
+                        }}
+                        markedDates={markedDates}
+                        theme={{
+                          todayTextColor: roleColors[attendanceRole],
+                          selectedDayBackgroundColor: roleColors[attendanceRole],
+                          arrowColor: roleColors[attendanceRole],
+                          dotColor: Colors.success,
+                          textDayFontWeight: '500',
+                          textMonthFontWeight: 'bold',
+                        }}
+                      />
+                    </View>
+                  )}
+
+                  {/* Date-wise Records */}
+                  {sortedDates.length === 0 ? (
+                    <View style={styles.emptyAdminState}>
+                      <Users size={48} color={Colors.border} />
+                      <Text style={styles.emptyAdminText}>
+                        {attendanceDateFilter ? `No records on ${attendanceDateFilter}` : 'No attendance records'}
+                      </Text>
+                    </View>
+                  ) : sortedDates.map(date => {
+                    const records = grouped[date];
+                    const pCount = records.filter(r => r.status !== 'absent').length;
+                    const aCount = records.filter(r => r.status === 'absent').length;
+                    return (
+                      <View key={date} style={{ marginBottom: 16 }}>
+                        {/* Date header */}
+                        <View style={{ backgroundColor: roleColors[attendanceRole], borderRadius: 12, paddingHorizontal: 16, paddingVertical: 11, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 15 }}>{date}</Text>
+                          <View style={{ flexDirection: 'row', gap: 14 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#A5F3A5' }} />
+                              <Text style={{ color: '#A5F3A5', fontWeight: '700', fontSize: 13 }}>{pCount} Present</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FCA5A5' }} />
+                              <Text style={{ color: '#FCA5A5', fontWeight: '700', fontSize: 13 }}>{aCount} Absent</Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {records.map((r: any) => (
+                          <View
+                            key={r.id}
+                            style={{
+                              backgroundColor: Colors.surface, borderRadius: 10, padding: 12,
+                              marginBottom: 8, flexDirection: 'row', alignItems: 'center',
+                              borderWidth: 1, borderColor: Colors.border,
+                              borderLeftWidth: 4, borderLeftColor: statusColor(r.status),
+                            }}
+                          >
+                            <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: statusColor(r.status) + '22', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                              <Text style={{ fontSize: 17, fontWeight: 'bold', color: statusColor(r.status) }}>
+                                {r.staff_name?.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontWeight: 'bold', fontSize: 14, color: Colors.text }}>{r.staff_name}</Text>
+                              <Text style={{ color: Colors.textSecondary, fontSize: 12, marginTop: 2 }}>{r.phone}</Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <View style={{ backgroundColor: statusColor(r.status) + '22', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: statusColor(r.status) }}>
+                                <Text style={{ color: statusColor(r.status), fontWeight: '700', fontSize: 12 }}>{statusLabel(r.status)}</Text>
+                              </View>
+                              {r.shift && <Text style={{ color: Colors.textSecondary, fontSize: 11 }}>{r.shift}</Text>}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  })}
+
+                  {/* Month Dropdown Modal for Attendance */}
+                  <Modal visible={showAttendanceMonthDropdown} transparent animationType="slide">
+                    <View style={styles.dropdownModalOverlay}>
+                      <View style={styles.dropdownMenu}>
+                        <View style={styles.dropdownHeader}>
+                          <Text style={styles.dropdownTitle}>Select Month</Text>
+                          <TouchableOpacity onPress={() => setShowAttendanceMonthDropdown(false)}>
+                            <X size={20} color={Colors.text} />
+                          </TouchableOpacity>
+                        </View>
+                        <ScrollView>
+                          {allAttMonths.map((m) => (
+                            <TouchableOpacity 
+                              key={m}
+                              style={styles.dropdownItem}
+                              onPress={() => {
+                                setAttendanceMonthFilter(m);
+                                setAttendanceDateFilter('');
+                                setShowAttendanceMonthDropdown(false);
+                              }}
+                            >
+                              <Text style={[
+                                styles.dropdownItemText,
+                                attendanceMonthFilter === m && styles.dropdownItemActive
+                              ]}>{formatFuelMonth(m)}</Text>
+                              {attendanceMonthFilter === m && <CheckCircle2 size={16} color={Colors.primary} />}
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    </View>
+                  </Modal>
+                </>
+              );
+            })()}
+          </View>
         )}
+
+        {/* ─── Fuel Tab ─── */}
+        {activeTab === 'Fuel' && (
+          <View style={styles.section}>
+            <Text style={[Typography.h3, styles.sectionTitle]}>Fuel Reports & Payments</Text>
+
+            {fuelLoading ? (
+              <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />
+            ) : (() => {
+              // Generate last 12 months dynamically
+              const allMonths = Array.from({length: 12}, (_, i) => {
+                const d = new Date();
+                d.setMonth(d.getMonth() - i);
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                return `${year}-${month}`;
+              });
+              
+              // Set default month if not selected
+              const selectedMonth = fuelMonthFilter || (allMonths.length > 0 ? allMonths[0] : '');
+
+              const filtered = fuelList.filter(r => {
+                let m = '';
+                if (r.date) {
+                  if (r.date.includes('-')) {
+                    const parts = r.date.split('-');
+                    if (parts[0].length === 4) m = `${parts[0]}-${parts[1]}`;
+                    else if (parts[2] && parts[2].length === 4) m = `${parts[2]}-${parts[1]}`;
+                    else m = r.date.slice(0, 7);
+                  } else m = r.date.slice(0, 7);
+                }
+                return m === selectedMonth;
+              }).sort((a, b) => b.date.localeCompare(a.date));
+
+              const totalAmount = filtered.reduce((s, r) => s + (r.amount || 0), 0);
+              const totalLiters = filtered.reduce((s, r) => s + (r.liters || 0), 0);
+              const paidAmount = fuelMonthPayments[selectedMonth] || 0;
+              const balanceAmount = totalAmount - paidAmount;
+
+              return (
+                <>
+                  {/* Month Selection */}
+                  <View style={{ marginBottom: 15 }}>
+                    <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 8, fontWeight: '600' }}>Select Month</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowFuelMonthDropdown(true)}
+                      style={{
+                        paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12,
+                        backgroundColor: Colors.surface,
+                        borderWidth: 1, borderColor: Colors.border,
+                        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'
+                      }}
+                    >
+                      <Text style={{ color: Colors.text, fontWeight: '600', fontSize: 14 }}>
+                        {selectedMonth ? formatFuelMonth(selectedMonth) : 'Select a month'}
+                      </Text>
+                      <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>▼</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Summary cards */}
+                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+                    <View style={{ width: '48%', backgroundColor: 'rgba(24,119,242,0.1)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: Colors.primary, marginBottom: 10 }}>
+                      <Text style={{ color: Colors.primary, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Total Spent</Text>
+                      <Text style={{ color: Colors.primary, fontSize: 20, fontWeight: 'bold', marginTop: 4 }}>₹{totalAmount.toLocaleString()}</Text>
+                    </View>
+                    <View style={{ width: '48%', backgroundColor: 'rgba(255,152,0,0.1)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#FF9800', marginBottom: 10 }}>
+                      <Text style={{ color: '#FF9800', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Total Liters</Text>
+                      <Text style={{ color: '#FF9800', fontSize: 20, fontWeight: 'bold', marginTop: 4 }}>{totalLiters.toFixed(1)} L</Text>
+                    </View>
+                    <View style={{ width: '48%', backgroundColor: 'rgba(76, 175, 80, 0.1)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#4CAF50' }}>
+                      <Text style={{ color: '#4CAF50', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Paid Amount</Text>
+                      <Text style={{ color: '#4CAF50', fontSize: 20, fontWeight: 'bold', marginTop: 4 }}>₹{paidAmount.toLocaleString()}</Text>
+                    </View>
+                    <View style={{ width: '48%', backgroundColor: 'rgba(244, 67, 54, 0.1)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#F44336' }}>
+                      <Text style={{ color: '#F44336', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>Balance Due</Text>
+                      <Text style={{ color: '#F44336', fontSize: 20, fontWeight: 'bold', marginTop: 4 }}>₹{balanceAmount.toLocaleString()}</Text>
+                    </View>
+                  </View>
+
+                  {selectedMonth ? (
+                    <TouchableOpacity 
+                      style={{ backgroundColor: Colors.primary, paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 20 }}
+                      onPress={() => {
+                        setFuelMonthFilter(selectedMonth);
+                        setShowFuelPaymentModal(true);
+                      }}
+                    >
+                      <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 14 }}>Add Payment for {formatFuelMonth(selectedMonth)}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  {/* Date filter for the selected month */}
+                  <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 8, fontWeight: '600' }}>Filter by Date</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+                    <TouchableOpacity
+                      onPress={() => setFuelDateFilter('')}
+                      style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, backgroundColor: !fuelDateFilter ? Colors.primary : Colors.surface, borderWidth: 1, borderColor: Colors.primary }}
+                    >
+                      <Text style={{ color: !fuelDateFilter ? Colors.white : Colors.primary, fontWeight: '600', fontSize: 13 }}>All Dates</Text>
+                    </TouchableOpacity>
+                    {[...new Set(filtered.map(r => r.date))].sort((a, b) => b.localeCompare(a)).map(d => (
+                      <TouchableOpacity
+                        key={d}
+                        onPress={() => setFuelDateFilter(d === fuelDateFilter ? '' : d)}
+                        style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, backgroundColor: fuelDateFilter === d ? Colors.primary : Colors.surface, borderWidth: 1, borderColor: Colors.primary }}
+                      >
+                        <Text style={{ color: fuelDateFilter === d ? Colors.white : Colors.primary, fontWeight: '600', fontSize: 13 }}>{d}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  {filtered.filter(r => !fuelDateFilter || r.date === fuelDateFilter).length === 0 ? (
+                    <View style={styles.emptyAdminState}>
+                      <Truck size={48} color={Colors.border} />
+                      <Text style={styles.emptyAdminText}>No fuel records found</Text>
+                    </View>
+                  ) : filtered.filter(r => !fuelDateFilter || r.date === fuelDateFilter).map((r: any) => (
+                    <View key={r.id} style={{ backgroundColor: Colors.surface, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: Colors.border, elevation: 1 }}>
+                      {/* Header row */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={{ backgroundColor: 'rgba(255,152,0,0.15)', padding: 8, borderRadius: 10 }}>
+                            <Truck size={18} color={'#FF9800'} />
+                          </View>
+                          <Text style={{ fontWeight: 'bold', fontSize: 15, color: Colors.text }}>{r.truckNo}</Text>
+                        </View>
+                        <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>{r.date}</Text>
+                      </View>
+                      {/* Details grid */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <View>
+                          <Text style={{ color: Colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4 }}>Employee</Text>
+                          <Text style={{ color: Colors.text, fontWeight: '600', fontSize: 14, marginTop: 2 }}>{r.employeeName}</Text>
+                        </View>
+                        <View style={{ alignItems: 'center' }}>
+                          <Text style={{ color: Colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4 }}>Liters</Text>
+                          <Text style={{ color: '#FF9800', fontWeight: '700', fontSize: 14, marginTop: 2 }}>{Number(r.liters).toFixed(1)} L</Text>
+                        </View>
+                        <View style={{ alignItems: 'center' }}>
+                          <Text style={{ color: Colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4 }}>Rate</Text>
+                          <Text style={{ color: Colors.text, fontWeight: '600', fontSize: 14, marginTop: 2 }}>₹{r.fuelPrice}/L</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={{ color: Colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4 }}>Amount</Text>
+                          <Text style={{ color: Colors.success, fontWeight: '700', fontSize: 16, marginTop: 2 }}>₹{Number(r.amount).toLocaleString()}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              );
+            })()}
+          </View>
+        )}
+
+        {/* Month Dropdown Modal for Fuel */}
+        <Modal visible={showFuelMonthDropdown} transparent animationType="slide">
+          <View style={styles.dropdownModalOverlay}>
+            <View style={styles.dropdownMenu}>
+              <View style={styles.dropdownHeader}>
+                <Text style={styles.dropdownTitle}>Select Month</Text>
+                <TouchableOpacity onPress={() => setShowFuelMonthDropdown(false)}>
+                  <X size={20} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView>
+                {Array.from({length: 12}, (_, i) => {
+                  const d = new Date();
+                  d.setMonth(d.getMonth() - i);
+                  const month = String(d.getMonth() + 1).padStart(2, '0');
+                  const year = d.getFullYear();
+                  return `${year}-${month}`;
+                }).map((m) => (
+                  <TouchableOpacity 
+                    key={m}
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setFuelMonthFilter(m);
+                      setFuelDateFilter(''); // Clear date filter when switching month
+                      setShowFuelMonthDropdown(false);
+                    }}
+                  >
+                    <Text style={[
+                      styles.dropdownItemText,
+                      fuelMonthFilter === m && styles.dropdownItemActive
+                    ]}>{formatFuelMonth(m)}</Text>
+                    {fuelMonthFilter === m && <CheckCircle2 size={16} color={Colors.primary} />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Payment Modal for Fuel */}
+        <Modal visible={showFuelPaymentModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { height: '40%' }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add Payment for {formatFuelMonth(fuelMonthFilter)}</Text>
+                <TouchableOpacity onPress={() => setShowFuelPaymentModal(false)}>
+                  <X size={24} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
+              <View style={{ padding: 20 }}>
+                <Text style={styles.inputLabel}>Amount (₹)</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary}
+                  style={[styles.adminInput, { backgroundColor: '#F9FAFB', fontSize: 18, fontWeight: 'bold' }]}
+                  placeholder="Enter amount"
+                  keyboardType="numeric"
+                  value={fuelPaymentInput}
+                  onChangeText={setFuelPaymentInput}
+                />
+                <TouchableOpacity 
+                  style={[styles.primaryAction, { marginTop: 25, paddingVertical: 14, alignItems: 'center' }]}
+                  onPress={handleAddFuelPayment}
+                >
+                  <Text style={[styles.primaryActionText, { fontSize: 16 }]}>Save Payment</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         <View style={{ height: 100 }} />
       </ScrollView>
     </View>
@@ -2249,13 +3336,21 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    paddingTop: 45,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    backgroundColor: Colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+      paddingTop: 50,
+      paddingHorizontal: 24,
+      paddingBottom: 20,
+      backgroundColor: Colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderBottomLeftRadius: 24,
+      borderBottomRightRadius: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.15,
+      shadowRadius: 20,
+      elevation: 10,
+      marginBottom: 10,
+    },
   backBtn: {
     marginRight: 15,
     padding: 5,
@@ -2279,15 +3374,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   statCard: {
-    backgroundColor: Colors.surface,
-    width: (Dimensions.get('window').width - 50) / 2,
-    padding: 15,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
+      backgroundColor: Colors.surface,
+      width: (Dimensions.get('window').width - 50) / 2,
+      padding: 18,
+      borderRadius: 24,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: 'rgba(0,0,0,0.02)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.08,
+      shadowRadius: 15,
+      elevation: 5,
+    },
   statIconContainer: {
     width: 40,
     height: 40,
@@ -2345,19 +3445,21 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   tab: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: Colors.surface,
-    borderRadius: 25,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+      paddingHorizontal: 24,
+      paddingVertical: 12,
+      backgroundColor: 'transparent',
+      borderRadius: 30,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
   activeTab: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
+      backgroundColor: Colors.primary,
+      shadowColor: Colors.primary,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
+      elevation: 8,
+    },
   tabText: {
     color: Colors.textSecondary,
     fontWeight: '600',
@@ -2388,16 +3490,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.05)',
   },
   productCard: {
-    backgroundColor: Colors.surface,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
+      backgroundColor: Colors.surface,
+      padding: 18,
+      borderRadius: 24,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: 'rgba(0,0,0,0.02)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.06,
+      shadowRadius: 15,
+      elevation: 4,
+    },
   productInfo: {
     flex: 1,
   },
@@ -2444,13 +3551,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   orderCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
+      backgroundColor: Colors.surface,
+      borderRadius: 24,
+      padding: 20,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: 'rgba(0,0,0,0.02)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.06,
+      shadowRadius: 15,
+      elevation: 5,
+    },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2567,13 +3679,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   activeCartCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 30,
-    borderWidth: 1,
-    borderColor: Colors.accent,
-  },
+      backgroundColor: Colors.surface,
+      borderRadius: 24,
+      padding: 20,
+      marginBottom: 30,
+      borderWidth: 1,
+      borderColor: Colors.accent,
+      shadowColor: Colors.accent,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.1,
+      shadowRadius: 20,
+      elevation: 8,
+    },
   activeCartItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2615,10 +3732,31 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'center',
-    padding: 20,
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      justifyContent: 'center',
+      padding: 24,
+    },
+  modalContent: {
+    backgroundColor: Colors.white,
+    padding: 24,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.text,
   },
   receiptLogo: {
     width: 120,
@@ -2910,12 +4048,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   priceEditContainer: {
-    backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: 24,
-    width: '85%',
-    alignItems: 'center',
-  },
+      backgroundColor: Colors.white,
+      borderRadius: 32,
+      padding: 32,
+      width: '90%',
+      alignItems: 'center',
+      elevation: 15,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 15 },
+      shadowOpacity: 0.15,
+      shadowRadius: 30,
+    },
   priceEditTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -3302,6 +4445,118 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.1 }],
     shadowOpacity: 0.3,
     shadowRadius: 6,
+  },
+  sectionContainer: {
+    flex: 1,
+    paddingHorizontal: 15,
+  },
+  sectionHeader: {
+    marginVertical: 15,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  addCategoryCard: {
+      backgroundColor: '#fff',
+      padding: 24,
+      borderRadius: 24,
+      elevation: 8,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.08,
+      shadowRadius: 20,
+      marginBottom: 20,
+    },
+  inputGroup: {
+    marginBottom: 15,
+  },
+  addCategoryBtn: {
+    backgroundColor: Colors.primary,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  addCategoryBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  roleChip: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  roleChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  roleChipText: {
+    color: Colors.textSecondary,
+    fontWeight: 'bold',
+  },
+  roleChipTextActive: {
+    color: Colors.white,
+  },
+  tabsContainer: {
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  tabContent: {
+    flex: 1,
+    padding: 15,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+  },
+  emptyText: {
+    color: '#999',
+    fontSize: 16,
+  },
+  customerCard: {
+      backgroundColor: '#fff',
+      padding: 18,
+      borderRadius: 20,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(0,0,0,0.02)',
+      flexDirection: 'row',
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 10,
+      elevation: 3,
+    },
+  customerInfo: {
+    flex: 1,
+  },
+  customerName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  customerPhone: {
+    color: '#666',
+    marginTop: 4,
+  },
+  deleteBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: Colors.white,
   },
 });
 

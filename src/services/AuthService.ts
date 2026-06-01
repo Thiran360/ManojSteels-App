@@ -16,16 +16,29 @@ class AuthService {
     footerBranding: '~ Manoj Steels ~',
     showGstin: true,
     showPaymentMethod: true,
+    defaultPaymentMethod: 'CASH / CREDIT',
     accentColor: '#1877F2',
     balanceDueDate: '',
     whatsappNumber: '',
   };
 
+  private initPromise: Promise<void>;
+
   private constructor() {
-    this.loadAdminCredentials();
-    this.loadEmployeeCredentials();
-    this.loadUserData();
-    this.loadReceiptSettings();
+    this.initPromise = this.init();
+  }
+
+  private async init() {
+    await Promise.all([
+      this.loadAdminCredentials(),
+      this.loadEmployeeCredentials(),
+      this.loadUserData(),
+      this.loadReceiptSettings()
+    ]);
+  }
+
+  public async waitForInit() {
+    await this.initPromise;
   }
 
   private async loadUserData() {
@@ -37,7 +50,9 @@ class AuthService {
           id: data.id,
           full_name: data.full_name || data.name,
           mobile_number: data.mobile_number || data.phone,
-          business_address: data.business_address || data.address
+          business_address: data.business_address || data.address,
+          isEmployee: data.isEmployee || data.role === 'employee',
+          role: data.role
         };
         this.notify();
       }
@@ -191,6 +206,7 @@ class AuthService {
             phone: userData.phone,
             password: userData.password,
             address: userData.address,
+            role: userData.role,
           }),
         }
       );
@@ -220,7 +236,7 @@ class AuthService {
       }
 
       // Success user data
-      const backendUser = result.user || result;
+      const backendUser = result.user || result.employee || result.data || result;
 
       const newUser = {
         id: backendUser.id || backendUser.employee_id || backendUser.pk || backendUser.userid,
@@ -249,7 +265,7 @@ class AuthService {
     }
   }
 
-  async adminCreateUser(userData: any) {
+  async apiCreateEmployee(userData: any) {
     try {
       const response = await fetch(
         'https://api.codingboss.in/inventory/signup/',
@@ -265,6 +281,7 @@ class AuthService {
             phone: userData.phone,
             password: userData.password,
             address: userData.address || '',
+            role: userData.role || 'user',
           }),
         }
       );
@@ -289,6 +306,144 @@ class AuthService {
     }
   }
 
+  async apiFetchUsers() {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/get-users/?role=employee', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch employees: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return Array.isArray(result) ? result : [];
+    } catch (e) {
+      console.log('Fetch Employees Error:', e);
+      return [];
+    }
+  }
+
+  async apiFetchCustomers() {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/get-users/?role=customer', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch customers: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return Array.isArray(result) ? result.map((c: any) => ({
+        ...c,
+        name: c.customer_name || c.name,
+        phone: c.customer_phone || c.phone,
+      })) : [];
+    } catch (e) {
+      console.log('Fetch Customers Error:', e);
+      return [];
+    }
+  }
+
+  async apiCreatePartyCustomer(customerData: { customer_name: string; customer_phone: string; password?: string; customer_password?: string }) {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/party-customers/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify(customerData)
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create party customer');
+      }
+
+      return await response.json();
+    } catch (e) {
+      console.log('Create Party Customer Error:', e);
+      throw e;
+    }
+  }
+
+  async apiDeleteUser(id: string) {
+    try {
+      const response = await fetch(`https://api.codingboss.in/inventory/signup/${id}/`, {
+        method: 'DELETE',
+        headers: {
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete user');
+      }
+
+      return true;
+    } catch (e) {
+      console.log('Delete User Error:', e);
+      throw e;
+    }
+  }
+
+  async apiDeleteCustomer(id: string) {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/inventory/delete-customer/', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ id: parseInt(id) })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete customer');
+      }
+
+      return true;
+    } catch (e) {
+      console.log('Delete Customer Error:', e);
+      throw e;
+    }
+  }
+
+  async apiDeleteEmployee(id: string) {
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/inventory/delete-employee/', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ id: parseInt(id) })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete employee');
+      }
+
+      return true;
+    } catch (e) {
+      console.log('Delete Employee Error:', e);
+      throw e;
+    }
+  }
+
   async login(phone: string, password: string) {
     try {
       const payload = {
@@ -297,9 +452,11 @@ class AuthService {
       };
 
       console.log('Sending Login Payload:', payload);
+      
+      const endpoint = 'https://api.codingboss.in/inventory/login/';
 
-      const response = await fetch(
-        'https://api.codingboss.in/inventory/login/',
+      const response = await fetch( 
+        endpoint,
         {
           method: 'POST',
           headers: {
@@ -335,13 +492,30 @@ class AuthService {
         );
       }
 
-      const backendUser = result.user || result;
+      const backendUser = result.customer || result.user || result.employee || result.data || result;
+      let finalRole = backendUser.role;
+
+      if (!finalRole) {
+        // Only do fallback role fetch for non-customer logins
+        try {
+          const users = await this.apiFetchUsers();
+          const matchedUser = users.find((u: any) => u.phone === phone || u.mobile_number === phone || String(u.phone) === String(phone));
+          if (matchedUser && matchedUser.role) {
+            finalRole = matchedUser.role;
+          }
+        } catch (err) {
+          console.log('Failed to fetch fallback role:', err);
+        }
+      }
 
       this.currentUser = {
-        id: backendUser.id || backendUser.employee_id || backendUser.pk || backendUser.userid || backendUser.uid || backendUser.employee?.id,
-        full_name: backendUser.name || backendUser.full_name || backendUser.username,
-        mobile_number: backendUser.phone || backendUser.mobile_number || backendUser.mobile,
+        id: backendUser.id || backendUser.customer_id || backendUser.employee_id || backendUser.pk || backendUser.userid || backendUser.uid || backendUser.employee?.id,
+        full_name: backendUser.name || backendUser.customer_name || backendUser.full_name || backendUser.username,
+        mobile_number: backendUser.phone || backendUser.customer_phone || backendUser.mobile_number || backendUser.mobile || phone,
         business_address: backendUser.address || backendUser.business_address || backendUser.location,
+        password: backendUser.password || backendUser.customer_password || password,
+        role: finalRole,
+        isEmployee: finalRole === 'employee'
       };
 
       await AsyncStorage.setItem('user_data', JSON.stringify(this.currentUser));
@@ -359,6 +533,76 @@ class AuthService {
         );
       }
 
+      throw e;
+    }
+  }
+
+  async loginEmployee(employee: any) {
+    this.currentUser = {
+      id: employee.id || employee.mobile,
+      full_name: employee.name || 'Employee',
+      mobile_number: employee.mobile,
+      business_address: 'Employee Portal',
+      isEmployee: true,
+      role: 'employee'
+    };
+    await AsyncStorage.setItem('user_data', JSON.stringify(this.currentUser));
+    this.notify();
+    return this.currentUser;
+  }
+
+  async loginAdmin(mobile: string, password?: string, isFallback: boolean = false) {
+    if (isFallback) {
+      this.currentUser = {
+        id: '1',
+        full_name: 'Master Admin',
+        mobile_number: mobile,
+        business_address: 'TN Palayam',
+        role: 'admin',
+        isEmployee: false
+      };
+      await AsyncStorage.setItem('user_data', JSON.stringify(this.currentUser));
+      this.notify();
+      return this.currentUser;
+    }
+
+    try {
+      const response = await fetch('https://api.codingboss.in/inventory/login/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ phone: mobile, password }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || result?.error) {
+        throw new Error(result?.error || result?.message || result?.detail || 'Invalid admin credentials');
+      }
+
+      const backendUser = result.customer || result.user || result.employee || result.data || result;
+      // We will assume backend returns role or is_admin, fallback logic can check role
+      if (backendUser.role !== 'admin' && !backendUser.is_superuser && !backendUser.is_staff) {
+        // Just a basic check in case an employee tries to login as admin
+        // If the backend restricts this, we're good. If not, we verify here.
+        throw new Error('User does not have admin privileges');
+      }
+
+      this.currentUser = {
+        id: backendUser.id || backendUser.pk || backendUser.uid || '1',
+        full_name: backendUser.name || backendUser.full_name || backendUser.username || 'Admin',
+        mobile_number: mobile,
+        business_address: backendUser.address || backendUser.business_address || 'TN Palayam',
+        role: 'admin',
+        isEmployee: false
+      };
+      await AsyncStorage.setItem('user_data', JSON.stringify(this.currentUser));
+      this.notify();
+      return this.currentUser;
+    } catch (e) {
+      console.log('Admin login API Error:', e);
       throw e;
     }
   }
@@ -381,9 +625,26 @@ class AuthService {
   }
 
   async apiFetchProfile() {
+    if (this.currentUser?.role === 'admin') {
+      return this.currentUser;
+    }
+
+    const isCustomer = this.currentUser?.role?.toLowerCase() === 'user' ||
+                       this.currentUser?.role?.toLowerCase() === 'customer';
+
+    // For customers: the login endpoint already returned all their details.
+    // Don't re-fetch from the full list (risk of matching wrong customer).
+    // Just return the current stored data directly.
+    if (isCustomer) {
+      return this.currentUser;
+    }
+
+    // For employees — fetch from get-users/?role=employee and find the match
+    const profileEndpoint = 'https://api.codingboss.in/inventory/get-users/?role=employee';
+
     try {
-      console.log('Fetching profile from signup endpoint...');
-      const response = await fetch('https://api.codingboss.in/inventory/signup/', {
+      console.log('Fetching profile from:', profileEndpoint);
+      const response = await fetch(profileEndpoint, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -392,40 +653,48 @@ class AuthService {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch from signup endpoint: ${response.status}`);
+        throw new Error(`Failed to fetch profile: ${response.status}`);
       }
 
       const result = await response.json();
-      console.log('Signup GET Response:', result);
+      console.log('Profile GET Response:', result);
 
       let profileData: any = null;
 
       if (Array.isArray(result)) {
-        // If the endpoint returns a list of signed-up users, find the matching one
         const currentMobile = this.currentUser?.mobile_number || this.currentUser?.phone;
         const currentId = this.currentUser?.id;
 
         profileData = result.find((u: any) =>
-          (currentMobile && (u.phone === currentMobile || u.mobile_number === currentMobile || u.mobile === currentMobile)) ||
-          (currentId && (String(u.id) === String(currentId) || String(u.employee_id) === String(currentId) || String(u.pk) === String(currentId)))
+          (currentMobile && (
+            u.phone === currentMobile || 
+            u.mobile_number === currentMobile || 
+            u.mobile === currentMobile ||
+            u.customer_phone === currentMobile
+          )) ||
+          (currentId && (
+            String(u.id) === String(currentId) || 
+            String(u.employee_id) === String(currentId) || 
+            String(u.pk) === String(currentId)
+          ))
         );
 
-        // If no matching user, use the last signed up user or fallback
         if (!profileData && result.length > 0) {
           profileData = result[result.length - 1];
         }
       } else {
-        profileData = result.user || result;
+        profileData = result.user || result.employee || result.customer || result.data || result;
       }
 
       if (profileData) {
         this.currentUser = {
           id: profileData.id || profileData.employee_id || profileData.pk || profileData.uid || profileData.employee?.id || this.currentUser?.id,
-          full_name: profileData.name || profileData.full_name || profileData.username || this.currentUser?.full_name,
-          mobile_number: profileData.phone || profileData.mobile_number || profileData.mobile || this.currentUser?.mobile_number,
+          full_name: profileData.name || profileData.customer_name || profileData.full_name || profileData.username || this.currentUser?.full_name,
+          mobile_number: profileData.phone || profileData.customer_phone || profileData.mobile_number || profileData.mobile || this.currentUser?.mobile_number,
           business_address: profileData.address || profileData.business_address || profileData.location || this.currentUser?.business_address,
           // Extra signup fields if any exist on the model
           email: profileData.email || this.currentUser?.email,
+          password: profileData.password || profileData.customer_password || this.currentUser?.password,
           role: profileData.role || profileData.employee_role || this.currentUser?.role,
           date_joined: profileData.created_at || profileData.date_joined || this.currentUser?.date_joined,
         };
@@ -451,7 +720,7 @@ class AuthService {
         if (!response.ok) throw new Error('Failed to fetch profile endpoint');
 
         const result = await response.json();
-        const profileData = result.user || result;
+        const profileData = result.user || result.employee || result.data || result;
 
         this.currentUser = {
           ...this.currentUser,

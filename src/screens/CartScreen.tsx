@@ -33,8 +33,15 @@ import {
   X,
   Check,
   PlusCircle,
+  Banknote,
+  Receipt,
+  LayoutGrid,
+  Box,
+  AlignJustify,
+  Package,
 } from 'lucide-react-native';
 import { cartService } from '../services/CartService';
+
 
 interface CartItem {
   id: string;
@@ -52,12 +59,13 @@ interface CartItem {
 interface Party {
   name: string;
   phone: string;
+  isCashSale?: boolean;
 }
 
 const getProductUnit = (category?: string) => {
   const cat = (category || '').toLowerCase();
   if (cat.includes('cement')) return 'Bags';
-  if (cat.includes('tmt')) return 'MM';
+  if (cat.includes('tmt')) return 'pcs';
   if (cat.includes('slab') || cat.includes('slap') || cat.includes('kadapa')) return 'Slabs';
   return 'units';
 };
@@ -78,6 +86,11 @@ const matchesCategory = (productCat?: string, selected?: string) => {
 
 const { width } = Dimensions.get('window');
 
+// Cash Sales color constants
+const CASH_GREEN = '#00A86B';
+const CASH_GREEN_LIGHT = 'rgba(0, 168, 107, 0.08)';
+const CASH_GREEN_BORDER = 'rgba(0, 168, 107, 0.25)';
+
 const CartScreenView = ({ navigation }: any) => {
   const [items, setItems] = useState<CartItem[]>(() => cartService.getCartItems());
   const [parties, setParties] = useState<Party[]>(() => cartService.getParties());
@@ -95,6 +108,7 @@ const CartScreenView = ({ navigation }: any) => {
   // Add party state
   const [newPartyName, setNewPartyName] = useState('');
   const [newPartyPhone, setNewPartyPhone] = useState('');
+  const [walkinCustomers, setWalkinCustomers] = useState<any[]>([]);
 
   // Add product state
   const [selectedPartyForAdd, setSelectedPartyForAdd] = useState<Party | null>(null);
@@ -102,9 +116,16 @@ const CartScreenView = ({ navigation }: any) => {
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [productQuantities, setProductQuantities] = useState<{ [key: string]: number }>({});
-  const [selectorSizeSelections, setSelectorSizeSelections] = useState<{ [prodId: string]: { [size: string]: number } }>({});
+  const [selectorSizeSelections, setSelectorSizeSelections] = useState<{ [prodId: string]: { [size: string]: { pieces: number, weight: number } } }>({});
   const [activeProductIdForPicker, setActiveProductIdForPicker] = useState<string | null>(null);
   const [sizePickerModalVisible, setSizePickerModalVisible] = useState(false);
+
+  // Cash Sales state
+  const [cashSectionExpanded, setCashSectionExpanded] = useState(false);
+  const [expandedCashKey, setExpandedCashKey] = useState<string | null>(null);
+  const [cashCustomerModalVisible, setCashCustomerModalVisible] = useState(false);
+  const [cashCustomerName, setCashCustomerName] = useState('');
+  const [cashCustomerPhone, setCashCustomerPhone] = useState('');
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -119,6 +140,17 @@ const CartScreenView = ({ navigation }: any) => {
       setAllProducts([...cartService.getProducts()]);
     };
     cartService.on('change', update);
+
+    const fetchCartEndpoint = async () => {
+      try {
+        await fetch('https://api.codingboss.in/inventory/cart/');
+        await cartService.apiFetchWalkinCustomers();
+      } catch (error) {
+        console.log('Error fetching endpoints:', error);
+      }
+    };
+    fetchCartEndpoint();
+
     return () => {
       cartService.off('change', update);
     };
@@ -131,6 +163,56 @@ const CartScreenView = ({ navigation }: any) => {
     }
   }, [addProductModalVisible]);
 
+  // Fetch walk-in customers when Add Party or Cash Sales modals open
+  useEffect(() => {
+    if (addPartyModalVisible || cashCustomerModalVisible) {
+      const fetchWalkins = async () => {
+        try {
+          const res = await fetch('https://api.codingboss.in/inventory/walkin-customers/', { headers: { 'ngrok-skip-browser-warning': 'true' }});
+          if (res.ok) {
+            const data = await res.json();
+            setWalkinCustomers(Array.isArray(data) ? data : []);
+          }
+        } catch (e) {
+          console.warn('Failed to fetch walk-in customers:', e);
+        }
+      };
+      fetchWalkins();
+    }
+  }, [addPartyModalVisible, cashCustomerModalVisible]);
+
+  const deleteWalkinCustomer = async (id: number) => {
+    Alert.alert(
+      'Delete Customer',
+      'Are you sure you want to permanently delete this walk-in customer?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch('https://api.codingboss.in/inventory/delete-customer/', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'ngrok-skip-browser-warning': 'true'
+                },
+                body: JSON.stringify({ id })
+              });
+              if (response.ok) {
+                setWalkinCustomers(prev => prev.filter(c => c.id !== id));
+              }
+            } catch (e) {
+              console.warn('Failed to delete customer:', e);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Grouped items helper
   const getItemsForParty = useCallback((partyName: string, partyPhone: string): CartItem[] => {
     return items.filter(
@@ -140,13 +222,17 @@ const CartScreenView = ({ navigation }: any) => {
     );
   }, [items]);
 
-  // Auto-expand if exactly one party exists
+  // Separate cash vs regular parties
+  const cashParties = parties.filter(p => p.isCashSale === true);
+  const regularParties = parties.filter(p => !p.isCashSale);
+
+  // Auto-expand if exactly one regular party exists
   useEffect(() => {
-    if (parties.length === 1 && expandedPartyKey === null) {
-      const key = `${parties[0].name}-${parties[0].phone}`;
+    if (regularParties.length === 1 && expandedPartyKey === null) {
+      const key = `${regularParties[0].name}-${regularParties[0].phone}`;
       setExpandedPartyKey(key);
     }
-  }, [parties, expandedPartyKey]);
+  }, [regularParties.length, expandedPartyKey]);
 
   const toggleExpand = (key: string) => {
     setExpandedPartyKey((prev) => (prev === key ? null : key));
@@ -190,11 +276,39 @@ const CartScreenView = ({ navigation }: any) => {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
             cartService.clearCartForParty(partyName, partyPhone);
             const key = `${partyName}-${partyPhone}`;
             if (expandedPartyKey === key) {
               setExpandedPartyKey(null);
+            }
+            if (expandedCashKey === key) {
+              setExpandedCashKey(null);
+            }
+
+            try {
+              const res = await fetch('https://api.codingboss.in/inventory/walkin-customers/', {
+                headers: { 'ngrok-skip-browser-warning': 'true' }
+              });
+              const customers = await res.json();
+              const match = customers.find((c: any) => 
+                (c.name === partyName || c.customer_name === partyName) && 
+                (c.phone === partyPhone || c.customer_phone === partyPhone)
+              );
+              if (match && match.id) {
+                await fetch('https://api.codingboss.in/inventory/delete-customer/', {
+                  method: 'DELETE',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'ngrok-skip-browser-warning': 'true'
+                  },
+                  body: JSON.stringify({ id: match.id })
+                });
+                setWalkinCustomers(prev => prev.filter(c => c.id !== match.id));
+              }
+            } catch (e) {
+              console.warn('Failed to delete from backend:', e);
             }
           },
         },
@@ -216,6 +330,25 @@ const CartScreenView = ({ navigation }: any) => {
       return;
     }
 
+    try {
+      await fetch('https://api.codingboss.in/inventory/walkin-customers/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({
+          customer_name: newPartyName.trim(),
+          customer_phone: newPartyPhone.trim(),
+          name: newPartyName.trim(),
+          phone: newPartyPhone.trim()
+        })
+      });
+    } catch (error) {
+      console.log('Error notifying party customers endpoint', error);
+    }
+
     await cartService.addCustomParty({
       name: newPartyName.trim(),
       phone: newPartyPhone.trim(),
@@ -227,6 +360,60 @@ const CartScreenView = ({ navigation }: any) => {
     setNewPartyName('');
     setNewPartyPhone('');
     setAddPartyModalVisible(false);
+  };
+
+  const handleAddCashSale = () => {
+    setCashCustomerName('');
+    setCashCustomerPhone('');
+    setCashCustomerModalVisible(true);
+  };
+
+  const handleSaveCashCustomer = async () => {
+    if (!cashCustomerName.trim()) {
+      Alert.alert('Required', 'Please enter a customer name.');
+      return;
+    }
+    if (!cashCustomerPhone.trim() || cashCustomerPhone.trim().length < 10) {
+      Alert.alert('Required', 'Please enter a valid 10-digit phone number.');
+      return;
+    }
+
+    const cashName = cashCustomerName.trim();
+    const cashPhone = cashCustomerPhone.trim();
+
+    try {
+      await fetch('https://api.codingboss.in/inventory/walkin-customers/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({
+          name: cashName,
+          phone: cashPhone
+        })
+      });
+    } catch (error) {
+      console.log('Error saving walk-in customer to API:', error);
+    }
+
+    await cartService.addCustomParty({
+      name: cashName,
+      phone: cashPhone,
+      isCashSale: true,
+    } as any);
+
+    const key = `${cashName}-${cashPhone}`;
+    setCashSectionExpanded(true);
+    setExpandedCashKey(key);
+    setCashCustomerModalVisible(false);
+    setCashCustomerName('');
+    setCashCustomerPhone('');
+
+    // Immediately open product selector for the new cash customer
+    const newParty: Party = { name: cashName, phone: cashPhone, isCashSale: true };
+    openAddProductsForParty(newParty);
   };
 
   const openAddProductsForParty = (party: Party) => {
@@ -258,7 +445,7 @@ const CartScreenView = ({ navigation }: any) => {
           ...prev,
           [activeProductIdForPicker]: {
             ...currentProdSelections,
-            [size]: 1
+            [size]: { pieces: 1, weight: 0 }
           }
         };
       }
@@ -270,14 +457,15 @@ const CartScreenView = ({ navigation }: any) => {
   const handleAdjustSelectorSizeQty = (productId: string, size: string, delta: number) => {
     setSelectorSizeSelections(prev => {
       const currentProdSelections = prev[productId] || {};
-      const currentQty = currentProdSelections[size] || 0;
-      const nextQty = Math.max(0, currentQty + delta);
+      const currentSelection = currentProdSelections[size] || { pieces: 0, weight: 0 };
+      const nextPieces = Math.max(0, currentSelection.pieces + delta);
       
       const newProdSelections = { ...currentProdSelections };
-      if (nextQty === 0) {
+      if (nextPieces <= 0 && delta < 0 && currentSelection.pieces <= 1) {
+        // Only delete if specifically removing
         delete newProdSelections[size];
       } else {
-        newProdSelections[size] = nextQty;
+        newProdSelections[size] = { ...currentSelection, pieces: nextPieces };
       }
       
       const nextSelections = { ...prev };
@@ -290,21 +478,53 @@ const CartScreenView = ({ navigation }: any) => {
     });
   };
 
+  const handleSetSelectorSizeQty = (productId: string, size: string, qtyText: string) => {
+    setSelectorSizeSelections(prev => {
+      const currentProdSelections = prev[productId] || {};
+      const currentSelection = currentProdSelections[size] || { pieces: 0, weight: 0 };
+      const nextPieces = parseInt(qtyText) || 0;
+      
+      const newProdSelections = { ...currentProdSelections };
+      newProdSelections[size] = { ...currentSelection, pieces: nextPieces };
+      
+      const nextSelections = { ...prev };
+      nextSelections[productId] = newProdSelections;
+      return nextSelections;
+    });
+  };
+
+  const handleSetSelectorSizeWeight = (productId: string, size: string, weightText: string) => {
+    setSelectorSizeSelections(prev => {
+      const currentProdSelections = prev[productId] || {};
+      const currentSelection = currentProdSelections[size] || { pieces: 0, weight: 0 };
+      const nextWeight = parseInt(weightText) || 0;
+      
+      const newProdSelections = { ...currentProdSelections };
+      newProdSelections[size] = { ...currentSelection, weight: nextWeight };
+      
+      const nextSelections = { ...prev };
+      nextSelections[productId] = newProdSelections;
+      return nextSelections;
+    });
+  };
+
   const handleAddTMTProductsToParty = async (product: any) => {
     if (!selectedPartyForAdd) return;
     const selections = selectorSizeSelections[product.id];
     if (!selections || Object.keys(selections).length === 0) return;
 
-    for (const [size, qty] of Object.entries(selections)) {
+    for (const [size, selection] of Object.entries(selections)) {
+      if (selection.pieces <= 0) continue;
+      const weightStr = selection.weight > 0 ? ` [${selection.weight}kg]` : '';
       const itemWithSize = {
         ...product,
         id: `${product.id}-${size}`,
-        name: `${product.name} (${size}MM)`,
+        name: `${product.name} (${size}MM)${weightStr}`,
         category: 'TMT Bars'
       };
       await cartService.addItemForParty(
         itemWithSize,
-        qty,
+        selection.pieces,
         selectedPartyForAdd.name,
         selectedPartyForAdd.phone
       );
@@ -382,7 +602,7 @@ const CartScreenView = ({ navigation }: any) => {
     </View>
   );
 
-  const renderPartyCard = ({ item }: { item: Party }) => {
+  const renderPartyCard = ({ item, index }: { item: Party, index?: number }) => {
     const key = `${item.name}-${item.phone}`;
     const isExpanded = expandedPartyKey === key;
     const partyItems = getItemsForParty(item.name, item.phone);
@@ -496,6 +716,128 @@ const CartScreenView = ({ navigation }: any) => {
     );
   };
 
+  // ── Cash Customer Card Renderer ──────────────────────────────────
+  const renderCashCustomerCard = (item: Party) => {
+    const key = `${item.name}-${item.phone}`;
+    const isExpanded = expandedCashKey === key;
+    const partyItems = getItemsForParty(item.name, item.phone);
+    const totalQty = getPartyTotalQty(partyItems);
+    const cashNumber = item.name.replace('Cash Customer #', '#');
+
+    return (
+      <View key={key} style={styles.cashCard}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => setExpandedCashKey(prev => (prev === key ? null : key))}
+          style={[styles.cashCardHeader, isExpanded && styles.cashCardHeaderExpanded]}
+        >
+          <View style={styles.partyHeaderLeft}>
+            <View style={styles.cashAvatar}>
+              <Banknote size={20} color={CASH_GREEN} />
+            </View>
+            <View style={styles.partyMeta}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.cashNameText} numberOfLines={1}>{item.name}</Text>
+                <View style={styles.cashBadgeTag}>
+                  <Text style={styles.cashBadgeTagText}>CASH</Text>
+                </View>
+              </View>
+              <Text style={styles.cashSubtext}>Walk-in cash customer</Text>
+            </View>
+          </View>
+          <View style={styles.partyHeaderRight}>
+            <View style={[styles.cashCountBadge, partyItems.length === 0 && styles.cashCountBadgeEmpty]}>
+              <Text style={[styles.cashCountBadgeText, partyItems.length === 0 && styles.cashCountBadgeTextEmpty]}>
+                {partyItems.length} Items
+              </Text>
+            </View>
+            {isExpanded ? (
+              <ChevronUp size={20} color={CASH_GREEN} />
+            ) : (
+              <ChevronDown size={20} color={Colors.textSecondary} />
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {isExpanded && (
+          <View style={styles.cashExpandedContent}>
+            {partyItems.length === 0 ? (
+              <View style={styles.emptyPartyContainer}>
+                <View style={[styles.emptyPartyIconCircle, { backgroundColor: 'rgba(0,168,107,0.06)' }]}>
+                  <ShoppingBag size={28} color={CASH_GREEN} />
+                </View>
+                <Text style={styles.emptyPartyText}>No items added yet</Text>
+                <Text style={styles.emptyPartySubtext}>Add products for this cash customer.</Text>
+                <TouchableOpacity
+                  style={styles.cashAddProductsBtnEmpty}
+                  onPress={() => openAddProductsForParty(item)}
+                >
+                  <PlusCircle size={16} color={Colors.white} style={{ marginRight: 6 }} />
+                  <Text style={styles.addProductsBtnTextEmpty}>Add Products</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <View style={styles.productsList}>
+                  {partyItems.map((prod) => renderProductItem(prod))}
+                </View>
+
+                <View style={styles.cashSummaryBox}>
+                  <View style={styles.cashSummaryRow}>
+                    <View style={styles.cashSummaryIconBox}>
+                      <Receipt size={14} color={CASH_GREEN} />
+                    </View>
+                    <Text style={styles.cashSummaryLabel}>Total Items</Text>
+                    <Text style={styles.cashSummaryValue}>{partyItems.length} products</Text>
+                  </View>
+                  <View style={styles.cashSummaryRow}>
+                    <View style={styles.cashSummaryIconBox}>
+                      <Banknote size={14} color={CASH_GREEN} />
+                    </View>
+                    <Text style={styles.cashSummaryLabel}>Total Qty</Text>
+                    <Text style={styles.cashSummaryValue}>{totalQty} units</Text>
+                  </View>
+                  <View style={[styles.cashSummaryRow, { borderTopWidth: 1, borderTopColor: CASH_GREEN_BORDER, marginTop: 6, paddingTop: 10 }]}>
+                    <Text style={styles.cashPaymentLabel}>💵 Payment Mode</Text>
+                    <View style={styles.cashPaymentTag}>
+                      <Text style={styles.cashPaymentTagText}>CASH</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.partyActionRow}>
+                  <TouchableOpacity
+                    style={[styles.partyBtnInline, styles.cashAddMoreBtn]}
+                    onPress={() => openAddProductsForParty(item)}
+                  >
+                    <PlusCircle size={18} color={CASH_GREEN} style={{ marginRight: 6 }} />
+                    <Text style={styles.cashAddMoreBtnText}>Add Products</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.partyBtnInline, styles.cashCheckoutBtn]}
+                    onPress={() => handleCheckoutForParty(item.name, item.phone)}
+                  >
+                    <Text style={styles.cashCheckoutBtnText}>Checkout</Text>
+                    <ArrowRight size={16} color={Colors.white} style={{ marginLeft: 6 }} />
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={styles.deletePartyBtn}
+              onPress={() => handleDeleteParty(item.name, item.phone)}
+            >
+              <Trash2 size={14} color={Colors.error} style={{ marginRight: 4 }} />
+              <Text style={styles.deletePartyText}>Delete Cash Sale</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   // Filter products catalog inside modal
   const filteredModalProducts = allProducts.filter(
     (p) => {
@@ -540,6 +882,67 @@ const CartScreenView = ({ navigation }: any) => {
         </TouchableOpacity>
       </View>
 
+      {/* Cash Sales Banner */}
+      <TouchableOpacity
+        activeOpacity={0.88}
+        style={styles.cashSalesBanner}
+        onPress={() => setCashSectionExpanded(prev => !prev)}
+      >
+        <View style={styles.cashSalesBannerLeft}>
+          <View style={styles.cashSalesBannerIcon}>
+            <Banknote size={22} color={CASH_GREEN} />
+          </View>
+          <View>
+            <Text style={styles.cashSalesBannerTitle}>Cash Sales</Text>
+            <Text style={styles.cashSalesBannerSubtitle}>
+              {cashParties.length > 0
+                ? `${cashParties.length} active cash ${cashParties.length === 1 ? 'customer' : 'customers'}`
+                : 'Quick billing for walk-in cash customers'}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.cashSalesBannerRight}>
+          <TouchableOpacity
+            style={styles.cashSalesNewBtn}
+            onPress={(e) => { e.stopPropagation?.(); handleAddCashSale(); }}
+            activeOpacity={0.85}
+          >
+            <Plus size={14} color={Colors.white} />
+            <Text style={styles.cashSalesNewBtnText}>New</Text>
+          </TouchableOpacity>
+          {cashSectionExpanded ? (
+            <ChevronUp size={20} color={CASH_GREEN} style={{ marginLeft: 6 }} />
+          ) : (
+            <ChevronDown size={20} color={CASH_GREEN} style={{ marginLeft: 6 }} />
+          )}
+        </View>
+      </TouchableOpacity>
+
+      {/* Cash Customer Cards (expanded) */}
+      {cashSectionExpanded && (
+        <View style={styles.cashCardsContainer}>
+          {cashParties.length === 0 ? (
+            <View style={styles.cashEmptyState}>
+              <Banknote size={32} color={CASH_GREEN} style={{ marginBottom: 8, opacity: 0.5 }} />
+              <Text style={styles.cashEmptyStateText}>No cash sales yet</Text>
+              <Text style={styles.cashEmptyStateSubtext}>Tap "New" to add a walk-in cash customer.</Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.cashCardsScroll}
+              contentContainerStyle={styles.cashCardsScrollContent}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+              indicatorStyle="black"
+            >
+              {cashParties.map((cp) => renderCashCustomerCard(cp))}
+              {/* Bottom spacer */}
+              <View style={{ height: 4 }} />
+            </ScrollView>
+          )}
+        </View>
+      )}
+
       {/* Party Search Bar */}
       <View style={styles.partySearchWrapper}>
         <View style={styles.partySearchBar}>
@@ -573,7 +976,7 @@ const CartScreenView = ({ navigation }: any) => {
         {/* Dropdown results */}
         {showPartyDropdown && (() => {
           const q = partySearchQuery.toLowerCase();
-          const matched = parties.filter(
+          const matched = regularParties.filter(
             p =>
               p.name.toLowerCase().includes(q) ||
               (p.phone || '').includes(q)
@@ -619,7 +1022,8 @@ const CartScreenView = ({ navigation }: any) => {
         })()}
       </View>
 
-      {parties.length === 0 ? (
+      {/* Regular Parties Section */}
+      {regularParties.length === 0 ? (
         <View style={styles.emptyStateContainer}>
           <View style={styles.emptyIconCircle}>
             <ShoppingBag size={50} color={Colors.textSecondary} />
@@ -638,7 +1042,7 @@ const CartScreenView = ({ navigation }: any) => {
         </View>
       ) : (
         <FlatList
-          data={[...parties].sort((a, b) => {
+          data={[...regularParties].sort((a, b) => {
             const keyA = `${a.name}-${a.phone}`;
             const keyB = `${b.name}-${b.phone}`;
             if (keyA === expandedPartyKey) return -1;
@@ -657,6 +1061,132 @@ const CartScreenView = ({ navigation }: any) => {
           }
         />
       )}
+
+      {/* Cash Customer Creation Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={cashCustomerModalVisible}
+        onRequestClose={() => setCashCustomerModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.cashModalContent}>
+            {/* Modal Header */}
+            <View style={styles.cashModalHeader}>
+              <View style={styles.cashModalHeaderIcon}>
+                <Banknote size={22} color={CASH_GREEN} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.cashModalTitle}>New Cash Sale</Text>
+                <Text style={styles.cashModalSubtitle}>Enter customer details to begin</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setCashCustomerModalVisible(false)}
+                style={styles.closeBtn}
+              >
+                <X size={20} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Body */}
+            <View style={styles.cashModalBody}>
+              <View style={styles.cashModalInfoBanner}>
+                <Text style={styles.cashModalInfoText}>
+                  💵 After saving, you'll be taken directly to add products for this customer.
+                </Text>
+              </View>
+              {walkinCustomers.length > 0 && (
+                <View style={{ marginBottom: 15 }}>
+                  <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 6 }}>Select Existing Walk-in Customer:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                    {walkinCustomers.map(c => (
+                      <View key={c.id || Math.random().toString()} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0fdf4', borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                        <TouchableOpacity 
+                          style={{ padding: 8, paddingRight: 4 }}
+                          onPress={() => {
+                            setCashCustomerName(c.name || c.customer_name || '');
+                            setCashCustomerPhone(c.phone || c.phone_number || c.customer_phone || '');
+                          }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: 'bold', color: CASH_GREEN }}>{c.name || c.customer_name}</Text>
+                          <Text style={{ fontSize: 11, color: Colors.textSecondary }}>{c.phone || c.phone_number || c.customer_phone}</Text>
+                        </TouchableOpacity>
+                        {c.id && (
+                          <TouchableOpacity 
+                            style={{ padding: 8, paddingLeft: 4 }}
+                            onPress={() => deleteWalkinCustomer(c.id)}
+                          >
+                            <X size={16} color={Colors.error} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Name Field */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Customer Name *</Text>
+                <View style={[styles.inputWrapper, styles.cashInputWrapper]}>
+                  <Receipt size={18} color={CASH_GREEN} />
+                  <TextInput
+                    style={styles.textInput}
+                    value={cashCustomerName}
+                    onChangeText={setCashCustomerName}
+                    placeholder="e.g. Rajesh Kumar"
+                    placeholderTextColor={Colors.textSecondary}
+                    autoCapitalize="words"
+                    autoFocus
+                  />
+                </View>
+              </View>
+
+              {/* Phone Field */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Phone Number *</Text>
+                <View style={[styles.inputWrapper, styles.cashInputWrapper]}>
+                  <Phone size={18} color={CASH_GREEN} />
+                  <TextInput
+                    style={styles.textInput}
+                    value={cashCustomerPhone}
+                    onChangeText={setCashCustomerPhone}
+                    placeholder="10-digit mobile number"
+                    placeholderTextColor={Colors.textSecondary}
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                  />
+                </View>
+              </View>
+
+              {/* Payment Mode Indicator */}
+              <View style={styles.cashModalPaymentRow}>
+                <Text style={styles.cashModalPaymentLabel}>Payment Mode</Text>
+                <View style={styles.cashPaymentTag}>
+                  <Text style={styles.cashPaymentTagText}>CASH</Text>
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={styles.btnRow}>
+                <TouchableOpacity
+                  style={[styles.btn, styles.cancelBtn]}
+                  onPress={() => setCashCustomerModalVisible(false)}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.cashSaveBtn]}
+                  onPress={handleSaveCashCustomer}
+                >
+                  <Banknote size={18} color={Colors.white} style={{ marginRight: 6 }} />
+                  <Text style={styles.saveBtnText}>Save & Add Products</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Add Party Modal */}
       <Modal
@@ -681,6 +1211,36 @@ const CartScreenView = ({ navigation }: any) => {
               <Text style={styles.modalDesc}>
                 Create a distinct shopping list/session. Products can be added separately for this client.
               </Text>
+
+              {walkinCustomers.length > 0 && (
+                <View style={{ marginBottom: 15 }}>
+                  <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 6 }}>Select Existing Customer:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                    {walkinCustomers.map(c => (
+                      <View key={c.id || Math.random().toString()} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#eff6ff', borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                        <TouchableOpacity 
+                          style={{ padding: 8, paddingRight: 4 }}
+                          onPress={() => {
+                            setNewPartyName(c.name || c.customer_name || '');
+                            setNewPartyPhone(c.phone || c.phone_number || c.customer_phone || '');
+                          }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: 'bold', color: Colors.primary }}>{c.name || c.customer_name}</Text>
+                          <Text style={{ fontSize: 11, color: Colors.textSecondary }}>{c.phone || c.phone_number || c.customer_phone}</Text>
+                        </TouchableOpacity>
+                        {c.id && (
+                          <TouchableOpacity 
+                            style={{ padding: 8, paddingLeft: 4 }}
+                            onPress={() => deleteWalkinCustomer(c.id)}
+                          >
+                            <X size={16} color={Colors.error} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Party Name *</Text>
@@ -776,28 +1336,59 @@ const CartScreenView = ({ navigation }: any) => {
             </View>
 
             {/* Premium Category Filter Tabs */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.categoryScroll}
-              contentContainerStyle={styles.categoryScrollContent}
-            >
-              {['All', 'Cement', 'TMT Bars', 'Kadapa Slabs', 'Others'].map((cat) => {
-                const isActive = selectedCategory === cat;
-                return (
-                  <TouchableOpacity
-                    key={cat}
-                    activeOpacity={0.8}
-                    style={[styles.categoryTab, isActive && styles.categoryTabActive]}
-                    onPress={() => setSelectedCategory(cat)}
-                  >
-                    <Text style={[styles.categoryTabText, isActive && styles.categoryTabTextActive]}>
-                      {cat}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <View style={{ alignItems: 'center', marginVertical: 12, paddingHorizontal: 10 }}>
+              <View style={{ 
+                backgroundColor: '#FFFFFF', 
+                borderRadius: 40, 
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                shadowColor: '#000', 
+                shadowOffset: { width: 0, height: 6 }, 
+                shadowOpacity: 0.08, 
+                shadowRadius: 10, 
+                elevation: 6,
+                width: '100%'
+              }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 22, paddingHorizontal: 10, alignItems: 'center' }}>
+                  {['All', 'Cement', 'TMT Bars', 'Kadapa Slabs', 'Others'].map((cat) => {
+                    const isActive = selectedCategory === cat;
+                    let Icon = Package;
+                    if (cat === 'All') Icon = LayoutGrid;
+                    else if (cat === 'Cement') Icon = Box;
+                    else if (cat === 'TMT Bars') Icon = AlignJustify;
+                    else if (cat === 'Kadapa Slabs') Icon = LayoutGrid;
+
+                    return (
+                      <TouchableOpacity 
+                        key={cat} 
+                        onPress={() => setSelectedCategory(cat)}
+                        style={{ alignItems: 'center', justifyContent: 'center' }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ 
+                          backgroundColor: isActive ? Colors.primary : 'transparent', 
+                          width: 42, 
+                          height: 42, 
+                          borderRadius: 50, overflow: 'hidden', 
+                          alignItems: 'center', 
+                          justifyContent: 'center',
+                          marginBottom: 4
+                        }}>
+                          <Icon size={20} color={isActive ? Colors.white : '#4F5E7B'} />
+                        </View>
+                        <Text style={{ 
+                          fontSize: 11, 
+                          fontWeight: isActive ? '700' : '500', 
+                          color: isActive ? Colors.primary : '#4F5E7B' 
+                        }}>
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </View>
           </View>
 
           {filteredModalProducts.length === 0 ? (
@@ -821,18 +1412,24 @@ const CartScreenView = ({ navigation }: any) => {
                   const selectedEntries = Object.entries(selectedSizes);
                   
                   return (
-                    <View style={styles.selectorProductCard}>
-                      <Image
-                        source={typeof item.image === 'number' ? item.image : { uri: item.image }}
-                        style={styles.selectorProductImage}
-                      />
-                      <View style={styles.selectorProductInfo}>
-                        <Text style={styles.selectorProductBrand}>{item.brand}</Text>
-                        <Text style={styles.selectorProductName} numberOfLines={1}>
-                          {item.name}
-                        </Text>
-                        <Text style={styles.selectorProductCategory}>{item.category}</Text>
-                        
+                    <View style={[styles.selectorProductCard, { flexDirection: 'column' }]}>
+                      {/* Top Row: Image & Basic Info */}
+                      <View style={{ flexDirection: 'row' }}>
+                        <Image
+                          source={typeof item.image === 'number' ? item.image : { uri: item.image }}
+                          style={styles.selectorProductImage}
+                        />
+                        <View style={styles.selectorProductInfo}>
+                          <Text style={styles.selectorProductBrand}>{item.brand}</Text>
+                          <Text style={styles.selectorProductName} numberOfLines={1}>
+                            {item.name}
+                          </Text>
+                          <Text style={styles.selectorProductCategory}>{item.category}</Text>
+                        </View>
+                      </View>
+
+                      {/* Bottom Area: Full Width TMT Selectors */}
+                      <View style={{ marginTop: 12 }}>
                         <View style={styles.dropdownContainerInline}>
                           <Text style={styles.sectionLabelInline}>Select Size (MM):</Text>
                           <TouchableOpacity
@@ -849,27 +1446,52 @@ const CartScreenView = ({ navigation }: any) => {
 
                         {selectedEntries.length > 0 && (
                           <View style={styles.selectionListInline}>
-                            <Text style={styles.sectionLabelInline}>Selected Sizes & Quantities:</Text>
-                            {selectedEntries.map(([size, qty]) => (
+                            <Text style={styles.sectionLabelInline}>Selected Sizes, Pieces & Weight:</Text>
+                            {selectedEntries.map(([size, selection]: [string, any]) => {
+                              const qty = selection.pieces || 0;
+                              const weight = selection.weight || 0;
+                              return (
                               <View key={size} style={styles.selectionRowInline}>
                                 <View style={styles.sizeTagInline}>
                                   <Text style={styles.sizeTagTextInline}>{size}MM</Text>
                                 </View>
-                                <View style={styles.qtyControlsInline}>
-                                  <TouchableOpacity
-                                    onPress={() => handleAdjustSelectorSizeQty(item.id, size, -1)}
-                                    style={styles.qtyActionBtnInline}
-                                  >
-                                    <Minus size={10} color={Colors.text} />
-                                  </TouchableOpacity>
-                                  <Text style={styles.qtyDisplayInline}>{qty}</Text>
-                                  <TouchableOpacity
-                                    onPress={() => handleAdjustSelectorSizeQty(item.id, size, 1)}
-                                    style={styles.qtyActionBtnInline}
-                                  >
-                                    <Plus size={10} color={Colors.text} />
-                                  </TouchableOpacity>
+                                
+                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 }}>
+                                  {/* Pieces Input */}
+                                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 16 }}>
+                                    <TextInput
+                                      style={{
+                                        flex: 1,
+                                        borderWidth: 1, borderColor: Colors.border, borderRadius: 6,
+                                        height: 36, textAlign: 'center', color: Colors.text, backgroundColor: Colors.white,
+                                        padding: 0, margin: 0,
+                                      }}
+                                      keyboardType="numeric"
+                                      value={qty === 0 ? '' : String(qty)}
+                                      onChangeText={(text) => handleSetSelectorSizeQty(item.id, size, text)}
+                                      placeholder="0"
+                                    />
+                                    <Text style={{ marginLeft: 6, color: Colors.textSecondary, fontSize: 13, fontWeight: '500' }}>pcs</Text>
+                                  </View>
+
+                                  {/* Weight Input */}
+                                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                    <TextInput
+                                      style={{
+                                        flex: 1,
+                                        borderWidth: 1, borderColor: Colors.border, borderRadius: 6,
+                                        height: 36, textAlign: 'center', color: Colors.text, backgroundColor: Colors.white,
+                                        padding: 0, margin: 0,
+                                      }}
+                                      keyboardType="numeric"
+                                      value={weight === 0 ? '' : String(weight)}
+                                      onChangeText={(text) => handleSetSelectorSizeWeight(item.id, size, text)}
+                                      placeholder="0"
+                                    />
+                                    <Text style={{ marginLeft: 6, color: Colors.textSecondary, fontSize: 13, fontWeight: '500' }}>kg</Text>
+                                  </View>
                                 </View>
+
                                 <TouchableOpacity
                                   onPress={() => handleAdjustSelectorSizeQty(item.id, size, -qty)}
                                   style={styles.removeBtnInline}
@@ -877,7 +1499,7 @@ const CartScreenView = ({ navigation }: any) => {
                                   <X size={14} color={Colors.error} />
                                 </TouchableOpacity>
                               </View>
-                            ))}
+                            )})}
 
                             <TouchableOpacity
                               style={styles.bulkAddBtnInline}
@@ -992,18 +1614,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 60 : 50,
-    paddingHorizontal: 20,
-    paddingBottom: 15,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingHorizontal: 24,
+    paddingBottom: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    elevation: 4,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
-    shadowRadius: 4,
+    shadowRadius: 10,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1033,16 +1657,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 8,
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 24,
     padding: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    elevation: 2,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
     borderWidth: 1,
     borderColor: Colors.border,
   },
@@ -1063,11 +1687,12 @@ const styles = StyleSheet.create({
   },
   topAddPartyBtn: {
     backgroundColor: Colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
     flexDirection: 'row',
     alignItems: 'center',
+    elevation: 4,
   },
   topAddPartyBtnText: {
     color: Colors.white,
@@ -1080,17 +1705,15 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   partyCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    marginBottom: 16,
+    backgroundColor: Colors.white,
+    borderRadius: 24,
+    marginBottom: 20,
     overflow: 'hidden',
-    elevation: 3,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
   },
   partyHeader: {
     flexDirection: 'row',
@@ -1101,7 +1724,7 @@ const styles = StyleSheet.create({
   },
   partyHeaderExpanded: {
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
   partyHeaderLeft: {
     flexDirection: 'row',
@@ -1511,17 +2134,22 @@ const styles = StyleSheet.create({
   },
   productSelectorContainer: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#F8F9FA',
   },
   selectorHeader: {
-    height: 60,
+    height: 64,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.white,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    borderBottomWidth: 0,
+    zIndex: 10,
   },
   selectorCloseBtn: {
     padding: 6,
@@ -1553,20 +2181,28 @@ const styles = StyleSheet.create({
   },
   selectorSearchContainer: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingTop: 16,
+    paddingBottom: 4,
+    backgroundColor: Colors.white,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    marginBottom: 8,
+    zIndex: 5,
   },
   selectorSearchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: '#F4F6F8',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    height: 52,
+    borderWidth: 1.5,
+    borderColor: '#E9ECEF',
   },
   selectorSearchInput: {
     flex: 1,
@@ -1597,27 +2233,27 @@ const styles = StyleSheet.create({
   },
   selectorProductCard: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 12,
+    backgroundColor: Colors.white,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: Colors.border,
-    elevation: 2,
+    borderColor: '#F0F2F5',
+    elevation: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
   },
   selectorProductImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
+    width: 88,
+    height: 88,
+    borderRadius: 16,
+    backgroundColor: '#F8F9FA',
   },
   selectorProductInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 16,
     justifyContent: 'space-between',
   },
   selectorProductBrand: {
@@ -1657,30 +2293,42 @@ const styles = StyleSheet.create({
   selectorQtyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 2,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E9ECEF',
+    padding: 4,
   },
   selectorQtyBtn: {
-    padding: 4,
+    padding: 6,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: 8,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   selectorQtyText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 'bold',
     color: Colors.text,
-    marginHorizontal: 8,
+    marginHorizontal: 10,
   },
   selectorAddBtn: {
-    backgroundColor: Colors.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    elevation: 3,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   selectorAddBtnText: {
     color: Colors.white,
@@ -1893,7 +2541,7 @@ const styles = StyleSheet.create({
   partyDropdownAvatar: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 50, overflow: 'hidden',
     backgroundColor: Colors.primary + '15',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1908,6 +2556,341 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
     fontWeight: '500',
+  },
+  // ── Cash Sales Styles ───────────────────────────────────────────
+  cashSalesBanner: {
+    marginHorizontal: 20,
+    marginBottom: 10,
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: CASH_GREEN,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    borderWidth: 1.5,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashSalesBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  cashSalesBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: CASH_GREEN_LIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cashSalesBannerTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: CASH_GREEN,
+  },
+  cashSalesBannerSubtitle: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  cashSalesBannerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cashSalesNewBtn: {
+    backgroundColor: CASH_GREEN,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    elevation: 1,
+  },
+  cashSalesNewBtnText: {
+    color: Colors.white,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  cashCardsContainer: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    maxHeight: 420,
+  },
+  cashCardsScroll: {
+    flexGrow: 0,
+  },
+  cashCardsScrollContent: {
+    paddingTop: 2,
+    paddingBottom: 4,
+  },
+  cashEmptyState: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CASH_GREEN_BORDER,
+    borderStyle: 'dashed',
+  },
+  cashEmptyStateText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  cashEmptyStateSubtext: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  cashCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 50, overflow: 'hidden',
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: CASH_GREEN_BORDER,
+    elevation: 2,
+    shadowColor: CASH_GREEN,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+  },
+  cashCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+    backgroundColor: Colors.white,
+  },
+  cashCardHeaderExpanded: {
+    borderBottomWidth: 1,
+    borderBottomColor: CASH_GREEN_BORDER,
+    backgroundColor: CASH_GREEN_LIGHT,
+  },
+  cashAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: CASH_GREEN_LIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cashNameText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  cashBadgeTag: {
+    backgroundColor: CASH_GREEN,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  cashBadgeTagText: {
+    color: Colors.white,
+    fontSize: 9,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  cashSubtext: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  cashCountBadge: {
+    backgroundColor: CASH_GREEN_LIGHT,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashCountBadgeEmpty: {
+    backgroundColor: 'rgba(101,103,107,0.06)',
+    borderColor: Colors.border,
+  },
+  cashCountBadgeText: {
+    color: CASH_GREEN,
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  cashCountBadgeTextEmpty: {
+    color: Colors.textSecondary,
+  },
+  cashExpandedContent: {
+    padding: 14,
+    backgroundColor: '#F8FDF9',
+  },
+  cashSummaryBox: {
+    backgroundColor: Colors.white,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+    gap: 8,
+  },
+  cashSummaryIconBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: CASH_GREEN_LIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cashSummaryLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  cashSummaryValue: {
+    fontSize: 14,
+    color: Colors.text,
+    fontWeight: '700',
+  },
+  cashPaymentLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: '600',
+  },
+  cashPaymentTag: {
+    backgroundColor: CASH_GREEN,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  cashPaymentTagText: {
+    color: Colors.white,
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  cashAddMoreBtn: {
+    backgroundColor: CASH_GREEN_LIGHT,
+    borderWidth: 1.5,
+    borderColor: CASH_GREEN,
+  },
+  cashAddMoreBtnText: {
+    color: CASH_GREEN,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  cashCheckoutBtn: {
+    backgroundColor: CASH_GREEN,
+    elevation: 2,
+    shadowColor: CASH_GREEN,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  cashCheckoutBtnText: {
+    color: Colors.white,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  cashAddProductsBtnEmpty: {
+    backgroundColor: CASH_GREEN,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 1,
+    marginTop: 4,
+  },
+  // ── Cash Customer Modal Styles ───────────────────────────────────
+  cashModalContent: {
+    width: width - 40,
+    backgroundColor: Colors.surface,
+    borderRadius: 24,
+    overflow: 'hidden',
+    elevation: 10,
+    borderWidth: 1.5,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: CASH_GREEN_BORDER,
+    backgroundColor: CASH_GREEN_LIGHT,
+  },
+  cashModalHeaderIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: Colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashModalTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: CASH_GREEN,
+  },
+  cashModalSubtitle: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  cashModalBody: {
+    padding: 20,
+  },
+  cashModalInfoBanner: {
+    backgroundColor: CASH_GREEN_LIGHT,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashModalInfoText: {
+    fontSize: 12,
+    color: CASH_GREEN,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  cashInputWrapper: {
+    borderColor: CASH_GREEN_BORDER,
+    borderWidth: 1.5,
+  },
+  cashModalPaymentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: CASH_GREEN_LIGHT,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: CASH_GREEN_BORDER,
+  },
+  cashModalPaymentLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  cashSaveBtn: {
+    flex: 2,
+    backgroundColor: CASH_GREEN,
   },
 });
 

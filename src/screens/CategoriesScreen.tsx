@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Dimensions,
   TextInput,
+  Image,
 } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Typography } from '../theme/typography';
@@ -30,12 +31,15 @@ import { cartService } from '../services/CartService';
 
 const CategoriesScreen = ({ navigation }: any) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState(cartService.getCategories());
   const [loading, setLoading] = useState(false);
 
   React.useEffect(() => {
-    // Dynamic fetch removed to use static categories
-    setCategories(DEFAULT_CATEGORIES);
+    const update = () => {
+      setCategories(cartService.getCategories());
+    };
+    cartService.on('change', update);
+    return () => cartService.off('change', update);
   }, []);
 
   const filteredCategories = categories.filter((c) =>
@@ -47,9 +51,13 @@ const CategoriesScreen = ({ navigation }: any) => {
       style={styles.categoryCard}
       onPress={() => navigation.navigate(item.name)}
     >
-      <View style={styles.iconContainer}>
-        <Text style={styles.icon}>{item.icon}</Text>
-      </View>
+      {item.image ? (
+        <Image source={typeof item.image === 'string' ? { uri: item.image } : item.image} style={[styles.iconContainer, { backgroundColor: 'transparent' }]} resizeMode="cover" />
+      ) : (
+        <View style={styles.iconContainer}>
+          <Text style={styles.icon}>{item.icon}</Text>
+        </View>
+      )}
       <View style={styles.categoryInfo}>
         <Text style={[Typography.h3, styles.categoryName]}>{item.name}</Text>
         <Text style={[Typography.bodySmall, styles.categoryCount]}>{item.count}</Text>
