@@ -41,13 +41,19 @@ import {
   Receipt,
   ClipboardCheck,
   Clock,
-  RefreshCw
+  RefreshCw,
+  PenLine,
+  ShieldAlert,
+  Fuel,
+  Settings,
+  Check
 } from 'lucide-react-native';
 import { Calendar } from 'react-native-calendars';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { generatePDF } from 'react-native-html-to-pdf';
 import Share from 'react-native-share';
 import ViewShot, { captureRef } from 'react-native-view-shot';
+import TcpSocket from 'react-native-tcp-socket';
 import { cartService } from '../services/CartService';
 import { authService } from '../services/AuthService';
 import { fuelService } from '../services/FuelService';
@@ -61,7 +67,10 @@ const formatFuelMonth = (yyyyMm: string) => {
 };
 
 const AdminDashboard = ({ navigation }: any) => {
-  const [activeTab, setActiveTab] = useState('Orders');
+  const currentUser = authService.getCurrentUser();
+  const isSudhakar = (currentUser?.mobile_number === '7904343214' || currentUser?.full_name?.toUpperCase() === 'SUDHAKAR');
+  const isEmployeeOnly = currentUser?.role?.toLowerCase() === 'employee' || currentUser?.role?.toLowerCase() === 'staff' || currentUser?.isEmployee;
+  const [activeTab, setActiveTab] = useState(isEmployeeOnly ? 'Receipt Options' : 'Orders');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [inventoryList, setInventoryList] = useState(cartService.getProducts());
@@ -70,6 +79,7 @@ const AdminDashboard = ({ navigation }: any) => {
   const [orderList, setOrderList] = useState(cartService.getOrders());
   const receiptRef = React.useRef<any>(null);
   const liveReceiptRef = React.useRef<any>(null);
+  const reminderReceiptRef = React.useRef<any>(null);
   const [bulkOrderList, setBulkOrderList] = useState(cartService.getBulkOrders());
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [showReceipt, setShowReceipt] = useState(false);
@@ -138,10 +148,18 @@ const AdminDashboard = ({ navigation }: any) => {
   const [showFuelPaymentModal, setShowFuelPaymentModal] = useState(false);
   const [fuelPaymentInput, setFuelPaymentInput] = useState('');
   const [showFuelMonthDropdown, setShowFuelMonthDropdown] = useState(false);
+  const [showEditFuelModal, setShowEditFuelModal] = useState(false);
+  const [editingFuel, setEditingFuel] = useState<any>(null);
+  const [editFuelTruck, setEditFuelTruck] = useState('');
+  const [editFuelEmp, setEditFuelEmp] = useState('');
+  const [editFuelLiters, setEditFuelLiters] = useState('');
+  const [editFuelRate, setEditFuelRate] = useState('');
+  const [editFuelAmt, setEditFuelAmt] = useState('');
+  const [editFuelDate, setEditFuelDate] = useState('');
 
   useEffect(() => {
     if (activeTab === 'Accounts') {
-      fetchAccounts();
+      fetchAccounts(accountsFilter);
     }
     if (activeTab === 'Attendance') {
       fetchAttendance();
@@ -149,11 +167,15 @@ const AdminDashboard = ({ navigation }: any) => {
     if (activeTab === 'Fuel') {
       fetchFuel();
     }
-  }, [activeTab]);
+  }, [activeTab, accountsFilter]);
 
-  const fetchAccounts = async () => {
+  const fetchAccounts = async (roleFilter: string = accountsFilter) => {
     try {
-      const response = await fetch('https://api.codingboss.in/inventory/get-users/');
+      let url = 'https://api.codingboss.in/inventory/get-users/';
+      if (roleFilter !== 'All') {
+        url = `https://api.codingboss.in/inventory/get-users/?role=${roleFilter.toLowerCase()}`;
+      }
+      const response = await fetch(url);
       const data = await response.json();
       setAccountsList(data);
     } catch(e) {
@@ -180,12 +202,8 @@ const AdminDashboard = ({ navigation }: any) => {
   const fetchFuel = async () => {
     setFuelLoading(true);
     try {
-      const response = await fetch('https://api.codingboss.in/inventory/fuel/', {
-        headers: { 'Accept': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-      });
-      const data = await response.json();
-      const list = Array.isArray(data) ? data : (data.value || []);
-      setFuelList(list);
+      const records = await fuelService.getFuelRecords();
+      setFuelList(records);
 
       const summary = await fuelService.getMonthlySummary();
       const paymentsMap: Record<string, number> = {};
@@ -210,6 +228,29 @@ const AdminDashboard = ({ navigation }: any) => {
       Alert.alert('Error', 'Please enter a valid amount');
       return;
     }
+
+    // Calculate balance due for the selected month to prevent overpayment
+    const filtered = fuelList.filter(r => {
+      let m = '';
+      if (r.date) {
+        if (r.date.includes('-')) {
+          const parts = r.date.split('-');
+          if (parts[0].length === 4) m = `${parts[0]}-${parts[1]}`;
+          else if (parts[2] && parts[2].length === 4) m = `${parts[2]}-${parts[1]}`;
+          else m = r.date.slice(0, 7);
+        } else m = r.date.slice(0, 7);
+      }
+      return m === fuelMonthFilter;
+    });
+    const totalAmount = filtered.reduce((s, r) => s + (r.amount || 0), 0);
+    const paidAmount = fuelMonthPayments[fuelMonthFilter] || 0;
+    const balanceAmount = totalAmount - paidAmount;
+
+    if (amt > balanceAmount) {
+      Alert.alert('Warning: Overpay', `You cannot pay more than the balance due (₹${balanceAmount.toFixed(2)})`);
+      return;
+    }
+
     await fuelService.addFuelPayment(fuelMonthFilter, amt);
     setShowFuelPaymentModal(false);
     setFuelPaymentInput('');
@@ -246,7 +287,7 @@ const AdminDashboard = ({ navigation }: any) => {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   useEffect(() => {
-    if (activeTab === 'Categories') {
+    if (activeTab === 'Categories' || activeTab === 'Inventory') {
       fetchDynamicCategories();
     }
   }, [activeTab]);
@@ -311,11 +352,28 @@ const AdminDashboard = ({ navigation }: any) => {
     image: '',
     category: 'Cement'
   });
-  const [brandList, setBrandList] = useState(cartService.getBrands());
+  const [brandList, setBrandList] = useState<any[]>([]);
   const [newBrandName, setNewBrandName] = useState('');
+  const [editingBrandId, setEditingBrandId] = useState<number | null>(null);
+  const [editingBrandName, setEditingBrandName] = useState('');
   const [tempAdminMobile, setTempAdminMobile] = useState(authService.getAdminCredentials().mobile);
   const [tempAdminPassword, setTempAdminPassword] = useState(authService.getAdminCredentials().password);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
+
+  const fetchBrandsAPI = async () => {
+    try {
+      const res = await fetch('https://api.codingboss.in/inventory/brands/', {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBrandList(data);
+      }
+    } catch (err) {
+      console.log('Error fetching brands', err);
+    }
+  };
+
 
   // Receipt Settings Hooks
   const [receiptSettings, setReceiptSettings] = useState(authService.getReceiptSettings());
@@ -336,6 +394,30 @@ const AdminDashboard = ({ navigation }: any) => {
   const [reminderCustomerName, setReminderCustomerName] = useState('');
   const [reminderCustomerPhone, setReminderCustomerPhone] = useState('');
   const [reminderBalance, setReminderBalance] = useState('');
+  const [reminderGpayOption, setReminderGpayOption] = useState('8124488447 - OFFICE ABMS');
+  const [reminderCustomGpay, setReminderCustomGpay] = useState('');
+  const [reminderCustomGpayName, setReminderCustomGpayName] = useState('');
+  const getTodayFormatted = () => {
+    const d = new Date();
+    const m = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    return `${d.getDate().toString().padStart(2, '0')}-${m[d.getMonth()]}-${d.getFullYear()}`;
+  };
+  const [reminderDate, setReminderDate] = useState(getTodayFormatted());
+  const [showReminderCalendar, setShowReminderCalendar] = useState(false);
+  const [showReminderGpayDropdown, setShowReminderGpayDropdown] = useState(false);
+
+  // WhatsApp Payment Receipt (per-send fields)
+  const [receiptCustomerName, setReceiptCustomerName] = useState('');
+  const [receiptCustomerPhone, setReceiptCustomerPhone] = useState('');
+  const [receiptAmount, setReceiptAmount] = useState('');
+  const [receiptDate, setReceiptDate] = useState(getTodayFormatted());
+  const [showReceiptCalendar, setShowReceiptCalendar] = useState(false);
+  const [receiptSenderName, setReceiptSenderName] = useState(currentUser?.full_name || currentUser?.name || 'Admin');
+  const [receiptPaymentMethod, setReceiptPaymentMethod] = useState<'GPay' | 'Cash'>('GPay');
+  const receivedReceiptRef = React.useRef<any>(null);
+  
+  const [whatsappTab, setWhatsappTab] = useState<'Debit' | 'Receipt'>('Debit');
+  
   const [reminderTotalAmount, setReminderTotalAmount] = useState('');
   const [reminderCurrentAmount, setReminderCurrentAmount] = useState('');
 
@@ -362,15 +444,17 @@ const AdminDashboard = ({ navigation }: any) => {
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     await cartService.globalRefresh();
+    if (activeTab === 'Fuel') await fetchFuel();
+    if (activeTab === 'Accounts') await fetchAccounts(accountsFilter);
+    if (activeTab === 'Attendance') await fetchAttendance();
     setRefreshing(false);
-  }, []);
+  }, [activeTab, accountsFilter]);
 
   useEffect(() => {
     const update = () => {
       setActiveCart([...cartService.getCartItems()]);
       setOrderList([...cartService.getOrders()]);
       setBulkOrderList([...cartService.getBulkOrders()]);
-      setBrandList([...cartService.getBrands()]);
       setInventoryList([...cartService.getProducts()]);
     };
 
@@ -381,6 +465,7 @@ const AdminDashboard = ({ navigation }: any) => {
     };
     
     // Initial fetch
+    fetchBrandsAPI();
     cartService.apiFetchProducts();
     cartService.apiFetchQuotations().catch(err => console.log('Quotations fetch err:', err));
     cartService.apiFetchBulkOrders().catch(err => console.log('Bulk fetch err:', err));
@@ -394,6 +479,23 @@ const AdminDashboard = ({ navigation }: any) => {
       authService.off('change', updateAuth);
     };
   }, []);
+
+  // Auto-refresh Orders and Tokens
+  useEffect(() => {
+    let interval: any;
+    if (activeTab === 'Orders') {
+      interval = setInterval(() => {
+        cartService.apiFetchQuotations().catch(err => console.log('Auto-fetch Orders Error:', err));
+      }, 10000); // Poll every 10 seconds
+    } else if (activeTab === 'Tokens') {
+      interval = setInterval(() => {
+        cartService.apiFetchBulkOrders().catch(err => console.log('Auto-fetch Tokens Error:', err));
+      }, 10000); // Poll every 10 seconds
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [activeTab]);
 
   const StatCard = ({ title, value, icon, color }: any) => (
     <View style={styles.statCard}>
@@ -682,11 +784,15 @@ const AdminDashboard = ({ navigation }: any) => {
   const renderOrder = ({ item }: { item: any }) => (
     <View style={styles.orderCard}>
       <View style={styles.orderHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.orderUser}>{item.name || item.user || 'Manoj Steels User'}</Text>
-          <Text style={styles.orderPhone}>{item.phone}</Text>
+        <View style={{ flex: 1, paddingRight: 8 }}>
+          <Text style={[styles.orderUser, { flexShrink: 1 }]} numberOfLines={2}>
+            {item.name ? item.name.split('||')[0] : (item.user ? item.user.split('||')[0] : 'Manoj Steels User')}
+          </Text>
+          <Text style={styles.orderPhone}>{item.phone ? item.phone.split('||')[0] : ''}</Text>
           {item.employee && (
-            <Text style={{ fontSize: 10, color: Colors.accent, marginTop: 2 }}>Placed by: {item.employee}</Text>
+            <Text style={{ fontSize: 10, color: Colors.accent, marginTop: 2 }}>
+              Placed by: {item.employee.split('||')[0]}
+            </Text>
           )}
           {item.address && (
             <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 4 }}>📍 {item.address}</Text>
@@ -757,9 +863,16 @@ const AdminDashboard = ({ navigation }: any) => {
       
       <View style={styles.orderItems}>
         {item.items.map((prod: any, idx: number) => (
-          <Text key={idx} style={styles.itemText}>
-            • {prod.name} x {prod.qty} {prod.category === 'Cement' ? 'Bags' : ''}
-          </Text>
+          <View key={idx}>
+            <Text style={styles.itemText}>
+              • {prod.name} x {prod.qty} {prod.category === 'Cement' ? 'Bags' : ''}
+            </Text>
+            {(prod.brand || prod.size || prod.weight) ? (
+              <Text style={{ fontSize: 11, color: Colors.textSecondary, marginLeft: 10, marginTop: 2 }}>
+                {[prod.brand && `Brand: ${prod.brand}`, prod.size && `Size: ${prod.size}`, prod.weight && `Weight: ${prod.weight}kg`].filter(Boolean).join(' | ')}
+              </Text>
+            ) : null}
+          </View>
         ))}
       </View>
       
@@ -768,9 +881,9 @@ const AdminDashboard = ({ navigation }: any) => {
         <Text style={styles.orderTime}>{item.time}</Text>
       </View>
       
-      <View style={styles.actionButtons}>
+      <View style={[styles.actionButtons, { flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' }]}>
         <TouchableOpacity 
-          style={styles.primaryAction}
+          style={[styles.primaryAction, { flex: 1, minWidth: 70 }]}
           onPress={() => {
             if (!item.items || item.items.length === 0) {
               Alert.alert('No Items', 'This order has no product items to price-fix. Items may have been stored as text notes only.');
@@ -786,6 +899,7 @@ const AdminDashboard = ({ navigation }: any) => {
         <TouchableOpacity 
           style={[
             styles.secondaryAction, 
+            { flex: 1, minWidth: 70 },
             item.status === 'PRICE_FIXED' && { backgroundColor: '#2196F3', borderColor: '#2196F3' }
           ]}
           onPress={async () => {
@@ -823,9 +937,15 @@ const AdminDashboard = ({ navigation }: any) => {
             item.status === 'PRICE_FIXED' && { color: Colors.white, fontWeight: 'bold' }
           ]}>View Bill</Text>
         </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.actionBtn, styles.primaryAction, { backgroundColor: '#4F5E7B', flex: 1, minWidth: 70 }]}
+          onPress={() => handleNetworkPrint(item)}
+        >
+          <Text style={styles.primaryActionText}>Print</Text>
+        </TouchableOpacity>
         {item.status !== 'Completed' && (
           <TouchableOpacity 
-            style={[styles.actionBtn, styles.primaryAction, { backgroundColor: Colors.success }]}
+            style={[styles.actionBtn, styles.primaryAction, { backgroundColor: Colors.success, flex: 1.2, minWidth: 80 }]}
             onPress={() => {
               const updated = orderList.map(o => o.id === item.id ? { ...o, status: 'Completed' } : o);
               setOrderList(updated);
@@ -1090,6 +1210,145 @@ const AdminDashboard = ({ navigation }: any) => {
     }
   };
 
+  const handleNetworkPrint = (orderToPrint: any = selectedOrder) => {
+    if (!orderToPrint) return;
+    
+    Alert.alert('Printing', 'Connecting to printer at 192.168.1.87...');
+    const PRINTER_IP = '192.168.1.87';
+    const PRINTER_PORT = 9100;
+    
+    // ESC/POS Commands
+    const ESC = '\x1B';
+    const GS = '\x1D';
+    const INIT = ESC + '@';
+    const ALIGN_CENTER = ESC + 'a' + '\x01';
+    const ALIGN_LEFT = ESC + 'a' + '\x00';
+    const BOLD_ON = ESC + 'E' + '\x01';
+    const BOLD_OFF = ESC + 'E' + '\x00';
+    const DOUBLE_ON = GS + '!' + '\x11';
+    const DOUBLE_OFF = GS + '!' + '\x00';
+    const CUT = GS + 'V' + '\x41' + '\x00';
+    
+    let escPosData = INIT;
+    
+    // Header
+    escPosData += ALIGN_CENTER;
+    if (receiptSettings.businessName) {
+      escPosData += BOLD_ON + DOUBLE_ON + receiptSettings.businessName + '\n' + DOUBLE_OFF + BOLD_OFF;
+    }
+    if (receiptSettings.tagline) {
+      escPosData += receiptSettings.tagline + '\n';
+    }
+    escPosData += '--------------------------------\n';
+    
+    // Bill Info
+    escPosData += ALIGN_LEFT;
+    escPosData += 'Bill No: ' + orderToPrint.id + '\n';
+    escPosData += 'Date: ' + new Date().toLocaleString() + '\n';
+    escPosData += 'Customer: ' + (orderToPrint.name || orderToPrint.user || orderToPrint.customerName || 'Manoj Steels User') + '\n';
+    if (orderToPrint.phone) {
+      escPosData += 'Phone: ' + orderToPrint.phone + '\n';
+    }
+    if (receiptSettings.showPaymentMethod) {
+      escPosData += 'Payment: ' + (orderToPrint.paymentMethod || 'CASH') + '\n';
+    }
+    escPosData += '--------------------------------\n';
+    
+    // Items Header
+    escPosData += 'Item            Qty        Total\n';
+    escPosData += '--------------------------------\n';
+    
+    // Items
+    orderToPrint.items.forEach((item: any) => {
+      let name = item.name || '';
+      if (name.length > 15) name = name.substring(0, 15);
+      name = name.padEnd(16, ' ');
+      
+      let qty = String(item.qty || 1);
+      qty = qty.padStart(3, ' ').padEnd(5, ' ');
+      
+      let total = 'Rs.' + ((item.price || 0) * (item.qty || 1));
+      total = total.padStart(11, ' ');
+      
+      escPosData += name + qty + total + '\n';
+    });
+    
+    escPosData += '--------------------------------\n';
+    
+    // Total
+    escPosData += ALIGN_CENTER;
+    escPosData += BOLD_ON + 'Grand Total: Rs.' + (orderToPrint.total || 0).toLocaleString() + '\n' + BOLD_OFF;
+    
+    if (receiptSettings.terms) {
+      escPosData += '\n' + receiptSettings.terms + '\n';
+    }
+    if (receiptSettings.footerBranding) {
+      escPosData += '\n' + receiptSettings.footerBranding + '\n';
+    }
+    
+    // Feed and Cut
+    escPosData += '\n\n\n\n' + CUT;
+    
+    try {
+      let isClosed = false;
+      const client = TcpSocket.createConnection(
+        {
+          host: PRINTER_IP,
+          port: PRINTER_PORT,
+        },
+        () => {}
+      );
+
+      client.setTimeout(5000);
+
+      client.on('connect', () => {
+        // Sanitize string for ESC/POS to prevent garbage print (strips non-ASCII, keeping control chars)
+        const safeData = escPosData
+          .replace(/[\u2018\u2019]/g, "'")
+          .replace(/[\u201C\u201D]/g, '"')
+          .replace(/[\u2013\u2014]/g, '-')
+          .replace(/[\u20B9]/g, 'Rs.') // Rupee symbol
+          .replace(/[^\x00-\x7F]/g, ''); // Strip invisible unicode formatting marks from toLocaleString
+          
+        // Write data to printer
+        client.write(safeData);
+        // Ensure data is sent before ending
+        setTimeout(() => {
+          client.end();
+          client.destroy();
+        }, 500);
+      });
+
+      client.on('close', () => {
+        if (!isClosed) {
+          isClosed = true;
+          Alert.alert('Success', 'Printed successfully to ' + PRINTER_IP);
+          try { client.destroy(); } catch(e) {}
+        }
+      });
+
+      client.on('error', (error) => {
+        if (!isClosed) {
+          isClosed = true;
+          console.log('Printer Error:', error);
+          Alert.alert('Error', 'Could not connect to printer at ' + PRINTER_IP);
+          try { client.destroy(); } catch(e) {}
+        }
+      });
+      
+      client.on('timeout', () => {
+        if (!isClosed) {
+          isClosed = true;
+          console.log('Printer Timeout');
+          Alert.alert('Error', 'Printer connection timed out');
+          try { client.destroy(); } catch(e) {}
+        }
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Failed to initialize printer connection');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -1106,7 +1365,7 @@ const AdminDashboard = ({ navigation }: any) => {
           <ChevronLeft size={24} color={Colors.white} />
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
-          <Text style={[Typography.h1, styles.headerTitle]}>Admin Panel</Text>
+          <Text style={[Typography.h1, styles.headerTitle]}>{isSudhakar ? 'Receipt Options' : 'Admin Panel'}</Text>
           <Text style={styles.headerSubtitle}>Manoj Steels Management</Text>
         </View>
       </View>
@@ -1125,7 +1384,9 @@ const AdminDashboard = ({ navigation }: any) => {
         elevation: 3,
       }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 6, alignItems: 'center' }}>
-          {['Orders', 'Tokens', 'Categories', 'Inventory', 'Receipt Options', 'Accounts', 'Attendance', 'Fuel'].map((t) => {
+          {['Orders', 'Tokens', 'Categories', 'Inventory', 'Receipt Options', 'Accounts', 'Attendance', 'Fuel']
+            .filter(t => !isEmployeeOnly || t === 'Receipt Options')
+            .map((t) => {
             const isActive = activeTab === t;
             const iconColor = isActive ? '#FFFFFF' : '#4B5563';
             const iconSize = 18;
@@ -1171,7 +1432,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   fontWeight: isActive ? 'bold' : '600',
                   color: isActive ? '#1E78FF' : '#4B5563',
                 }}>
-                  {t === 'Receipt Options' ? 'Receipts' : t}
+                  {t === 'Receipt Options' ? 'Voucher' : t}
                 </Text>
               </TouchableOpacity>
             );
@@ -1388,12 +1649,12 @@ const AdminDashboard = ({ navigation }: any) => {
                 <TouchableOpacity 
                   style={[styles.printFinalBtn, { backgroundColor: '#4F5E7B', marginTop: 0 }]}
                   onPress={() => {
-                    Alert.alert('Success', 'Sending to Bluetooth Printer...');
+                    handleNetworkPrint();
                     setShowReceipt(false);
                   }}
                 >
                   <Printer size={20} color={Colors.white} />
-                  <Text style={styles.printFinalText}>Print to Bluetooth</Text>
+                  <Text style={styles.printFinalText}>Print Receipt (Network)</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -1568,8 +1829,7 @@ const AdminDashboard = ({ navigation }: any) => {
                 value={(() => {
                   const today = new Date().toLocaleDateString();
                   const regularToday = orderList.filter(o => o.date === today).length;
-                  const bulkToday = bulkOrderList.filter(o => o.date === today).length;
-                  return (regularToday + bulkToday).toString();
+                  return regularToday.toString();
                 })()} 
                 icon={<ShoppingBag size={20} color={Colors.accent} />} 
                 color={Colors.accent}
@@ -1822,10 +2082,22 @@ const AdminDashboard = ({ navigation }: any) => {
                     shadowRadius: 8,
                     elevation: 3,
                   }}
-                  onPress={() => {
+                  onPress={async () => {
                     if (newBrandName.trim()) {
-                      cartService.addBrand(newBrandName.trim());
-                      setNewBrandName('');
+                      try {
+                        await fetch('https://api.codingboss.in/inventory/brands/', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'ngrok-skip-browser-warning': 'true'
+                          },
+                          body: JSON.stringify({ name: newBrandName.trim() })
+                        });
+                        setNewBrandName('');
+                        fetchBrandsAPI();
+                      } catch (err) {
+                        Alert.alert('Error', 'Failed to add brand');
+                      }
                     }
                   }}
                 >
@@ -1834,9 +2106,9 @@ const AdminDashboard = ({ navigation }: any) => {
               </View>
               
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                {brandList.map((brand) => (
+                {brandList.map((brand: any) => (
                   <View 
-                    key={brand} 
+                    key={brand.id} 
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -1848,18 +2120,112 @@ const AdminDashboard = ({ navigation }: any) => {
                       borderColor: '#E5E7EB',
                     }}
                   >
-                    <Text style={{ color: '#374151', fontSize: 13, fontWeight: '600' }}>{brand}</Text>
-                    <TouchableOpacity 
-                      onPress={() => cartService.removeBrand(brand)}
-                      style={{
-                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                        borderRadius: 10,
-                        padding: 3,
-                        marginLeft: 8,
-                      }}
-                    >
-                      <X size={10} color={Colors.error} />
-                    </TouchableOpacity>
+                    {editingBrandId === brand.id ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TextInput
+                          style={{
+                            height: 24,
+                            padding: 0,
+                            borderBottomWidth: 1,
+                            borderColor: Colors.primary,
+                            minWidth: 80,
+                            color: Colors.text,
+                            fontSize: 13,
+                            marginRight: 6
+                          }}
+                          value={editingBrandName}
+                          onChangeText={setEditingBrandName}
+                          autoFocus
+                        />
+                        <TouchableOpacity
+                          onPress={async () => {
+                            if (editingBrandName.trim()) {
+                              try {
+                                await fetch(`https://api.codingboss.in/inventory/brands/${brand.id}/`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'ngrok-skip-browser-warning': 'true'
+                                  },
+                                  body: JSON.stringify({ name: editingBrandName.trim() })
+                                });
+                                setEditingBrandId(null);
+                                fetchBrandsAPI();
+                              } catch (err) {
+                                Alert.alert('Error', 'Failed to update brand');
+                              }
+                            }
+                          }}
+                          style={{
+                            backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                            borderRadius: 10,
+                            padding: 4,
+                            marginRight: 4
+                          }}
+                        >
+                          <Check size={12} color={Colors.success} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setEditingBrandId(null)}
+                          style={{
+                            backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                            borderRadius: 10,
+                            padding: 4,
+                          }}
+                        >
+                          <X size={12} color={Colors.error} />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={{ color: '#374151', fontSize: 13, fontWeight: '600' }}>{brand.name}</Text>
+                        <TouchableOpacity 
+                          onPress={() => {
+                            setEditingBrandId(brand.id);
+                            setEditingBrandName(brand.name);
+                          }}
+                          style={{
+                            backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                            borderRadius: 10,
+                            padding: 3,
+                            marginLeft: 8,
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, color: '#2196F3' }}>✏️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          onPress={async () => {
+                            Alert.alert('Confirm', `Delete brand "${brand.name}"?`, [
+                              { text: 'Cancel', style: 'cancel' },
+                              { 
+                                text: 'Delete', 
+                                style: 'destructive',
+                                onPress: async () => {
+                                  try {
+                                    await fetch(`https://api.codingboss.in/inventory/brands/${brand.id}/`, {
+                                      method: 'DELETE',
+                                      headers: { 'ngrok-skip-browser-warning': 'true' }
+                                    });
+                                  } catch (err) {
+                                    console.log('Spurious RN fetch error on DELETE 204:', err);
+                                  } finally {
+                                    fetchBrandsAPI();
+                                  }
+                                }
+                              }
+                            ]);
+                          }}
+                          style={{
+                            backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                            borderRadius: 10,
+                            padding: 3,
+                            marginLeft: 4,
+                          }}
+                        >
+                          <X size={10} color={Colors.error} />
+                        </TouchableOpacity>
+                      </>
+                    )}
                   </View>
                 ))}
               </View>
@@ -2003,17 +2369,17 @@ const AdminDashboard = ({ navigation }: any) => {
 
               <TouchableOpacity 
                 activeOpacity={0.7}
-                style={{ flex: 1, backgroundColor: rBusinessName === 'ANANTH CEMENT AND STEELS' ? '#E65100' : Colors.surface, padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#E65100', alignItems: 'center' }}
+                style={{ flex: 1, backgroundColor: (rBusinessName || '').includes('Ananth') ? '#E65100' : Colors.surface, padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#E65100', alignItems: 'center' }}
                 onPress={() => {
-                  setRBusinessName('ANANTH CEMENT AND STEELS');
+                  setRBusinessName('Ananth Building Material - TN Palayam');
                   setRPhone('9600612632, 9364476444');
                   setRAddress('201, Sathy Aathani main road, TN palayam');
                   setRBalanceDueDate('');
-                  setRFooterBranding('~ Ananth Cement and Steels ~');
+                  setRFooterBranding('~ ANANTH BUILDING MATERIALS & SUPPLIERS ~');
                   setRAccentColor('#FF9800'); // Warning Amber
                 }}
               >
-                <Text style={{ color: rBusinessName === 'ANANTH CEMENT AND STEELS' ? Colors.white : '#E65100', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>Ananth Cement and Steels</Text>
+                <Text style={{ color: (rBusinessName || '').includes('Ananth') ? Colors.white : '#E65100', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>ANANTH BUILDING MATERIALS & SUPPLIERS</Text>
               </TouchableOpacity>
             </View>
 
@@ -2024,10 +2390,10 @@ const AdminDashboard = ({ navigation }: any) => {
               <View style={styles.mockReceiptContent}>
                 <View style={{ alignItems: 'center', marginBottom: 6 }}>
                   <Image 
-                    source={rBusinessName === 'ANANTH CEMENT AND STEELS' ? require('../assets/ananth_receipt_logo.png') : require('../assets/receipt_logo.png')} 
+                    source={(rBusinessName || '').includes('Ananth') ? require('../assets/ananth_receipt_logo.png') : require('../assets/receipt_logo.png')} 
                     style={{ 
-                      width: rBusinessName === 'ANANTH CEMENT AND STEELS' ? '95%' : '80%', 
-                      height: rBusinessName === 'ANANTH CEMENT AND STEELS' ? 70 : 40, 
+                      width: (rBusinessName || '').includes('Ananth') ? '95%' : '80%', 
+                      height: (rBusinessName || '').includes('Ananth') ? 70 : 40, 
                       marginBottom: 4 
                     }} 
                     resizeMode="contain" 
@@ -2056,7 +2422,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB' }}>
                     <Image source={require('../assets/gpay_icon.png')} style={{ width: 40, height: 20, marginRight: 8 }} resizeMode="contain" />
                     <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1F2937', letterSpacing: 1 }}>
-                      {rBusinessName === 'ANANTH CEMENT AND STEELS' ? '7094488447' : '8124488447'}
+                      {(rBusinessName || '').includes('Ananth') ? '7094488447' : '8124488447'}
                     </Text>
                   </View>
                 </View>
@@ -2229,16 +2595,32 @@ const AdminDashboard = ({ navigation }: any) => {
               </TouchableOpacity>
             </View>
 
-            {/* ── WhatsApp Payment Reminder Section ── */}
-            <View style={[styles.brandManageCard, { marginTop: 20, borderWidth: 2, borderColor: '#25D366' }]}>
+            {/* ── WhatsApp Actions Segmented Control ── */}
+            <View style={{ flexDirection: 'row', backgroundColor: '#F3F4F6', padding: 4, borderRadius: 12, marginTop: 20 }}>
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8, backgroundColor: whatsappTab === 'Debit' ? Colors.white : 'transparent', elevation: whatsappTab === 'Debit' ? 2 : 0, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } }}
+                onPress={() => setWhatsappTab('Debit')}
+              >
+                <Text style={{ fontSize: 15, fontWeight: whatsappTab === 'Debit' ? 'bold' : '600', color: whatsappTab === 'Debit' ? '#128C7E' : Colors.textSecondary }}>Debit Balance</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8, backgroundColor: whatsappTab === 'Receipt' ? Colors.white : 'transparent', elevation: whatsappTab === 'Receipt' ? 2 : 0, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } }}
+                onPress={() => setWhatsappTab('Receipt')}
+              >
+                <Text style={{ fontSize: 15, fontWeight: whatsappTab === 'Receipt' ? 'bold' : '600', color: whatsappTab === 'Receipt' ? '#059669' : Colors.textSecondary }}>Receipt</Text>
+              </TouchableOpacity>
+            </View>
+
+            {whatsappTab === 'Debit' && (
+              <View style={[styles.brandManageCard, { marginTop: 20, borderWidth: 2, borderColor: '#25D366' }]}>
               {/* Header */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                 <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#25D366', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
                   <Text style={{ fontSize: 20 }}>💬</Text>
                 </View>
                 <View>
-                  <Text style={[styles.inputLabel, { fontSize: 16, color: '#128C7E', fontWeight: 'bold', marginBottom: 0 }]}>WhatsApp Payment Reminder</Text>
-                  <Text style={{ fontSize: 11, color: Colors.textSecondary }}>Send a payment reminder directly via WhatsApp</Text>
+                  <Text style={[styles.inputLabel, { fontSize: 16, color: '#128C7E', fontWeight: 'bold', marginBottom: 0 }]}>Debit Balance</Text>
+                  <Text style={{ fontSize: 11, color: Colors.textSecondary }}>Send a debit balance reminder directly via WhatsApp</Text>
                 </View>
               </View>
 
@@ -2318,6 +2700,157 @@ const AdminDashboard = ({ navigation }: any) => {
                 />
               </View>
 
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Balance As On Date</Text>
+                <TouchableOpacity 
+                  style={[styles.adminInput, { backgroundColor: Colors.white, justifyContent: 'center' }]}
+                  onPress={() => setShowReminderCalendar(true)}
+                >
+                  <Text style={{ color: reminderDate ? Colors.text : Colors.textSecondary, fontSize: 15 }}>
+                    {reminderDate || 'Select Date (e.g. 29-JUN-2026)'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>GPay Number to Show</Text>
+                <TouchableOpacity 
+                  style={[styles.adminInput, { backgroundColor: Colors.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                  onPress={() => setShowReminderGpayDropdown(!showReminderGpayDropdown)}
+                >
+                  <Text style={{ color: Colors.text, fontSize: 15 }}>{reminderGpayOption}</Text>
+                  <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>▼</Text>
+                </TouchableOpacity>
+                {showReminderGpayDropdown && (
+                  <View style={{ backgroundColor: 'white', borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 4, elevation: 2 }}>
+                    {['8124488447 - OFFICE ABMS', '7094488447 - RAVI', 'OTHERS'].map(opt => (
+                      <TouchableOpacity 
+                        key={opt}
+                        style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' }}
+                        onPress={() => {
+                          setReminderGpayOption(opt);
+                          setShowReminderGpayDropdown(false);
+                        }}
+                      >
+                        <Text style={{ fontSize: 15 }}>{opt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {reminderGpayOption === 'OTHERS' && (
+                  <View>
+                    <TextInput 
+                      placeholderTextColor={Colors.textSecondary}
+                      style={[styles.adminInput, { marginTop: 8 }]}
+                      value={reminderCustomGpayName}
+                      onChangeText={setReminderCustomGpayName}
+                      placeholder="Enter Custom GPay Name (e.g. KARTHIK)"
+                      autoCapitalize="characters"
+                    />
+                    <TextInput 
+                      placeholderTextColor={Colors.textSecondary}
+                      style={[styles.adminInput, { marginTop: 8 }]}
+                      value={reminderCustomGpay}
+                      onChangeText={setReminderCustomGpay}
+                      placeholder="Enter Custom GPay Number"
+                      keyboardType="phone-pad"
+                    />
+                  </View>
+                )}
+              </View>
+
+              {/* Hidden Reminder Receipt View for capturing */}
+              <View style={{ position: 'absolute', top: -9999, left: -9999 }}>
+                <View ref={reminderReceiptRef} collapsable={false} style={{ width: 400, backgroundColor: Colors.white, borderWidth: 2, borderColor: '#4285F4' }}>
+                  {/* The top part */}
+                  <View style={{ backgroundColor: Colors.white, padding: 15, paddingBottom: 0 }}>
+                    <View style={{ alignItems: 'center', marginBottom: 6 }}>
+                      <Image 
+                        source={rBusinessName.toUpperCase().includes('ANANTH') ? require('../assets/ananth_receipt_logo.png') : require('../assets/receipt_logo.png')} 
+                        style={{ width: rBusinessName.toUpperCase().includes('ANANTH') ? '95%' : '80%', height: rBusinessName.toUpperCase().includes('ANANTH') ? 70 : 40, marginBottom: 4 }} 
+                        resizeMode="contain" 
+                      />
+                    </View>
+                    <View style={styles.mockReceiptDivider} />
+                    <View style={{ alignItems: 'center', paddingHorizontal: 16, paddingBottom: 6 }}>
+                      <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4, lineHeight: 18 }}>
+                        📍 {rAddress || 'Business Address'}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4 }}>
+                        📞 {rPhone || '9876543210'}
+                      </Text>
+                    </View>
+                    <View style={{ marginVertical: 12, alignItems: 'center' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB' }}>
+                        <Image source={require('../assets/gpay_icon.png')} style={{ width: 60, height: 30, marginRight: 12 }} resizeMode="contain" />
+                        <View>
+                          <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1F2937', letterSpacing: 1 }}>
+                            {reminderGpayOption === 'OTHERS' ? reminderCustomGpay || '0000000000' : reminderGpayOption.split(' - ')[0]}
+                          </Text>
+                          {reminderGpayOption !== 'OTHERS' ? (
+                            <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#4B5563', textTransform: 'uppercase' }}>
+                              {reminderGpayOption.split(' - ')[1]}
+                            </Text>
+                          ) : (
+                            reminderCustomGpayName ? (
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#4B5563', textTransform: 'uppercase' }}>
+                                {reminderCustomGpayName}
+                              </Text>
+                            ) : null
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                    <View style={[styles.mockReceiptDivider, { borderStyle: 'dashed' }]} />
+                    {rTerms ? <Text style={styles.mockTermsText}>{rTerms}</Text> : null}
+                    {rFooterBranding ? <Text style={[styles.mockFooterBranding, { color: '#2563EB', fontWeight: 'bold' }]}>{rFooterBranding}</Text> : null}
+                  </View>
+                  
+                  {/* The green part */}
+                  <View style={{ backgroundColor: '#E6F4D0', padding: 20, marginTop: 15 }}>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1B5E20', marginBottom: 12 }}>🔔 Payment Reminder 🔔</Text>
+                    <View style={[styles.mockReceiptDivider, { borderStyle: 'dashed', borderColor: '#A5D6A7' }]} />
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1F2937', marginTop: 12 }}>Hello {reminderCustomerName || 'Customer'} 👋</Text>
+                    <Text style={{ fontSize: 14, color: '#374151', marginTop: 12, lineHeight: 22 }}>
+                      This is a gentle reminder regarding your pending payment with us.
+                    </Text>
+                    <View style={{ backgroundColor: '#C8E6C9', borderRadius: 12, padding: 15, marginVertical: 15, borderWidth: 1, borderColor: '#A5D6A7', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1B5E20', marginBottom: 8, letterSpacing: 1 }}>💰 BALANCE AS ON {reminderDate || 'DD-MMM-YYYY'}</Text>
+                      <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#D32F2F' }}>₹{reminderBalance || '0'}</Text>
+                    </View>
+                    <Text style={{ fontSize: 14, color: '#374151', lineHeight: 22 }}>
+                      Kindly make the payment at your earliest convenience to avoid any delays.
+                    </Text>
+                    <View style={[styles.mockReceiptDivider, { borderStyle: 'dashed', borderColor: '#A5D6A7', marginVertical: 12 }]} />
+                    <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1B5E20', textAlign: 'center' }}>Thank you for your support 🙏</Text>
+                  </View>
+                </View>
+              </View>
+
+              <Modal visible={showReminderCalendar} transparent={true} animationType="fade">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                  <View style={{ width: '90%', backgroundColor: 'white', borderRadius: 10, overflow: 'hidden' }}>
+                    <Calendar
+                      onDayPress={(day: any) => {
+                        const parts = day.dateString.split('-');
+                        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+                        const formatted = `${parts[2]}-${months[parseInt(parts[1], 10)-1]}-${parts[0]}`;
+                        setReminderDate(formatted);
+                        setShowReminderCalendar(false);
+                      }}
+                      theme={{
+                        selectedDayBackgroundColor: Colors.primary,
+                        todayTextColor: Colors.primary,
+                        arrowColor: Colors.primary,
+                      }}
+                    />
+                    <TouchableOpacity onPress={() => setShowReminderCalendar(false)} style={{ padding: 15, alignItems: 'center', borderTopWidth: 1, borderColor: '#eee' }}>
+                      <Text style={{ color: Colors.error, fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Modal>
+
               {/* Send WhatsApp Reminder Button */}
               <TouchableOpacity
                 style={{
@@ -2350,7 +2883,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   const phone = `91${rawPhone}`;
 
                   const dueText = rBalanceDueDate ? `\n📅 *Due Date:* ${rBalanceDueDate}` : '';
-                  const gpayNum = rBusinessName === 'ANANTH CEMENT AND STEELS' ? '7094488447' : '8124488447';
+                  const gpayNum = (rBusinessName || '').includes('Ananth') ? '7094488447' : '8124488447';
                   const customer = reminderCustomerName.trim() ? `*${reminderCustomerName.trim()}*` : '*Sir/Madam*';
                   
                   const message =
@@ -2362,21 +2895,21 @@ const AdminDashboard = ({ navigation }: any) => {
                     `📲 *Google Pay:* ${gpayNum}\n\n` +
                     `Thank you for your support 🙏\n\n` +
                     `━━━━━━━━━━━━━━\n` +
-                    `🏢 *${rBusinessName || 'BUSINESS NAME'}*`;
+                    `🏢 *${(rBusinessName || '').includes('Ananth') ? 'ANANTH BUILDING MATERIALS & SUPPLIERS' : rBusinessName || 'BUSINESS NAME'}*`;
 
 
 
                   const url = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
                   
-                  // Capture the Live Receipt Preview as an image
-                  captureRef(liveReceiptRef, {
+                  // Capture the Reminder Receipt Preview as an image
+                  captureRef(reminderReceiptRef, {
                     format: 'png',
                     quality: 0.9,
                   }).then((uri) => {
                     // Send to WhatsApp using react-native-share
                     Share.shareSingle({
                       title: 'Payment Reminder',
-                      message: message,
+                      message: '', // The user wants ONLY the image to go with the entered details
                       url: uri,
                       social: Share.Social.WHATSAPP as any,
                       whatsAppNumber: phone, // Android directly opens chat with this number
@@ -2405,6 +2938,266 @@ const AdminDashboard = ({ navigation }: any) => {
                 </Text>
               </View>
             </View>
+            )}
+
+            {whatsappTab === 'Receipt' && (
+              <View style={[styles.brandManageCard, { marginTop: 20, borderWidth: 2, borderColor: '#34D399' }]}>
+              {/* Header */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#34D399', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                  <Text style={{ fontSize: 20 }}>🧾</Text>
+                </View>
+                <View>
+                  <Text style={[styles.inputLabel, { fontSize: 16, color: '#059669', fontWeight: 'bold', marginBottom: 0 }]}>Receipt</Text>
+                  <Text style={{ fontSize: 11, color: Colors.textSecondary }}>Send a payment confirmation receipt via WhatsApp</Text>
+                </View>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: '#D1FAE5', marginVertical: 12 }} />
+
+              <Text style={[styles.inputLabel, { color: '#059669', fontWeight: 'bold', marginBottom: 12 }]}>Receipt Details</Text>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Customer Name</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} 
+                  style={styles.adminInput}
+                  value={receiptCustomerName}
+                  onChangeText={setReceiptCustomerName}
+                  placeholder="e.g. Ramesh Kumar"
+                  autoCapitalize="words"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Customer WhatsApp Number</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: Colors.border, borderRadius: 10, backgroundColor: Colors.white, overflow: 'hidden' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 12, paddingVertical: 14, borderRightWidth: 1, borderRightColor: Colors.border }}>
+                    <Text style={{ fontSize: 16 }}>🇮🇳</Text>
+                    <Text style={{ marginLeft: 4, fontWeight: 'bold', color: Colors.text, fontSize: 14 }}>+91</Text>
+                  </View>
+                  <TextInput
+                    placeholderTextColor={Colors.textSecondary}
+                    style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: Colors.text }}
+                    value={receiptCustomerPhone}
+                    onChangeText={(t) => setReceiptCustomerPhone(t.replace(/\D/g, '').slice(0, 10))}
+                    keyboardType="phone-pad"
+                    placeholder="9876543210"
+                    maxLength={10}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Amount Received (₹)</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} 
+                  style={[styles.adminInput, { color: '#059669', fontWeight: 'bold' }]}
+                  value={receiptAmount}
+                  onChangeText={setReceiptAmount}
+                  keyboardType="numeric"
+                  placeholder="e.g. 11000"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Date Received</Text>
+                <TouchableOpacity 
+                  style={[styles.adminInput, { backgroundColor: Colors.white, justifyContent: 'center' }]}
+                  onPress={() => setShowReceiptCalendar(true)}
+                >
+                  <Text style={{ color: receiptDate ? Colors.text : Colors.textSecondary, fontSize: 15 }}>
+                    {receiptDate || 'Select Date (e.g. 06-JUL-2026)'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Payment Method</Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8, backgroundColor: receiptPaymentMethod === 'GPay' ? '#F0FDF4' : '#F5F5F5', borderWidth: 1, borderColor: receiptPaymentMethod === 'GPay' ? '#34D399' : Colors.border }}
+                    onPress={() => setReceiptPaymentMethod('GPay')}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: receiptPaymentMethod === 'GPay' ? 'bold' : '600', color: receiptPaymentMethod === 'GPay' ? '#059669' : Colors.textSecondary }}>via GPay</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8, backgroundColor: receiptPaymentMethod === 'Cash' ? '#F0FDF4' : '#F5F5F5', borderWidth: 1, borderColor: receiptPaymentMethod === 'Cash' ? '#34D399' : Colors.border }}
+                    onPress={() => setReceiptPaymentMethod('Cash')}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: receiptPaymentMethod === 'Cash' ? 'bold' : '600', color: receiptPaymentMethod === 'Cash' ? '#059669' : Colors.textSecondary }}>via Cash</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.inputLabel}>Sender Name</Text>
+                <TextInput placeholderTextColor={Colors.textSecondary} 
+                  style={styles.adminInput}
+                  value={receiptSenderName}
+                  onChangeText={setReceiptSenderName}
+                  placeholder="e.g. Manoj"
+                  autoCapitalize="words"
+                />
+              </View>
+              
+              {/* Hidden Received Receipt View for capturing */}
+              <View style={{ position: 'absolute', top: -9999, left: -9999 }}>
+                <View ref={receivedReceiptRef} collapsable={false} style={{ width: 400, backgroundColor: Colors.white, borderWidth: 2, borderColor: '#34D399', paddingBottom: 20 }}>
+                  <View style={{ backgroundColor: Colors.white, padding: 15, paddingBottom: 0 }}>
+                    <View style={{ alignItems: 'center', marginBottom: 6 }}>
+                      <Image 
+                        source={rBusinessName.toUpperCase().includes('ANANTH') ? require('../assets/ananth_receipt_logo.png') : require('../assets/receipt_logo.png')} 
+                        style={{ width: rBusinessName.toUpperCase().includes('ANANTH') ? '95%' : '80%', height: rBusinessName.toUpperCase().includes('ANANTH') ? 70 : 40, marginBottom: 4 }} 
+                        resizeMode="contain" 
+                      />
+                    </View>
+                    <View style={[styles.mockReceiptDivider, { borderStyle: 'dashed' }]} />
+                    <View style={{ alignItems: 'center', paddingHorizontal: 16, paddingBottom: 6 }}>
+                      <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4, lineHeight: 18 }}>
+                        📍 {rAddress || 'Business Address'}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: 4 }}>
+                        📞 {rPhone || '9876543210'}
+                      </Text>
+                    </View>
+                    
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1F2937', letterSpacing: 2, marginVertical: 8 }}>RECEIPT</Text>
+                    <View style={{ height: 1, backgroundColor: '#E5E7EB', width: '100%', marginBottom: 15 }} />
+                    
+                    <View style={{ marginTop: 5 }}>
+                      <Text style={{ fontSize: 16, color: '#1F2937' }}>Hello <Text style={{ fontWeight: 'bold' }}>{receiptCustomerName || 'Customer'}</Text> 👋</Text>
+                      <Text style={{ fontSize: 14, color: '#4B5563', marginTop: 12, lineHeight: 22 }}>
+                        Thank you for your payment to
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#111827', marginTop: 2 }}>
+                        M/S {rBusinessName || 'Business Name'}.
+                      </Text>
+                      
+                      <View style={{ backgroundColor: '#F0FDF4', borderRadius: 16, padding: 20, marginVertical: 20, borderWidth: 1, borderColor: '#D1FAE5', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 15, color: '#065F46', textAlign: 'center', marginBottom: 6 }}>
+                          We have received your payment as of
+                        </Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#065F46', marginBottom: 12 }}>
+                          {receiptDate || 'DD-MMM-YYYY'}
+                        </Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#DC2626', marginBottom: 12 }}>
+                          Amount Received: ₹{receiptAmount || '0'}
+                        </Text>
+                        <View style={{ backgroundColor: '#EFF6FF', borderRadius: 20, paddingVertical: 6, paddingHorizontal: 16, borderWidth: 1, borderColor: '#BFDBFE', flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1E3A8A', marginRight: receiptPaymentMethod === 'GPay' ? 8 : 0 }}>via {receiptPaymentMethod === 'Cash' ? 'Cash 💵' : ''}</Text>
+                          {receiptPaymentMethod === 'GPay' && (
+                            <Image source={require('../assets/gpay_icon.png')} style={{ width: 45, height: 20 }} resizeMode="contain" />
+                          )}
+                        </View>
+                      </View>
+
+                      <View style={{ alignItems: 'center', marginVertical: 10 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280' }}>Sent by <Text style={{ color: '#1D4ED8', fontWeight: 'bold' }}>{receiptSenderName || 'Admin'}</Text></Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#000000', marginTop: 12 }}>Thank you for your support 🙏</Text>
+                      </View>
+
+                      <View style={[styles.mockReceiptDivider, { borderStyle: 'dashed', marginVertical: 12 }]} />
+                      <Text style={{ fontSize: 13, fontStyle: 'italic', color: '#6B7280', textAlign: 'center' }}>Goods once sold cannot be returned.</Text>
+                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1D4ED8', textAlign: 'center', marginTop: 8 }}>~ {(rBusinessName || '').includes('Ananth') ? 'ANANTH BUILDING MATERIALS & SUPPLIERS' : rBusinessName || 'Business Name'} ~</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              <Modal visible={showReceiptCalendar} transparent={true} animationType="fade">
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                  <View style={{ width: '90%', backgroundColor: 'white', borderRadius: 10, overflow: 'hidden' }}>
+                    <Calendar
+                      onDayPress={(day: any) => {
+                        const parts = day.dateString.split('-');
+                        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+                        const formatted = `${parts[2]}-${months[parseInt(parts[1], 10)-1]}-${parts[0]}`;
+                        setReceiptDate(formatted);
+                        setShowReceiptCalendar(false);
+                      }}
+                      theme={{
+                        selectedDayBackgroundColor: Colors.primary,
+                        todayTextColor: Colors.primary,
+                        arrowColor: Colors.primary,
+                      }}
+                    />
+                    <TouchableOpacity onPress={() => setShowReceiptCalendar(false)} style={{ padding: 15, alignItems: 'center', borderTopWidth: 1, borderColor: '#eee' }}>
+                      <Text style={{ color: Colors.error, fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Modal>
+
+              {/* Send WhatsApp Receipt Button */}
+              <TouchableOpacity
+                style={{
+                  marginTop: 16,
+                  backgroundColor: '#34D399',
+                  borderRadius: 14,
+                  paddingVertical: 14,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  elevation: 3,
+                  shadowColor: '#34D399',
+                  shadowOpacity: 0.4,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                }}
+                onPress={() => {
+                  const rawPhone = receiptCustomerPhone.trim().replace(/\D/g, '');
+                  if (!rawPhone || rawPhone.length < 10) {
+                    Alert.alert('Invalid Number', 'Please enter a valid 10-digit WhatsApp number.');
+                    return;
+                  }
+                  if (!receiptAmount.trim()) {
+                    Alert.alert('Missing Info', 'Please enter the received amount.');
+                    return;
+                  }
+
+                  const phone = `91${rawPhone}`;
+                  const customer = receiptCustomerName.trim() ? `*${receiptCustomerName.trim()}*` : '*Sir/Madam*';
+                  
+                  const message =
+                    `🧾 *Payment Receipt* 🧾\n\n` +
+                    `Hello ${customer} 👋\n\n` +
+                    `Thank you for your payment to *M/S ${rBusinessName || 'Our Business'}*.\n\n` +
+                    `✅ *Amount Received:* ₹${receiptAmount.trim()}\n` +
+                    `💰 *Mode:* via ${receiptPaymentMethod}\n` +
+                    `📅 *Date:* ${receiptDate}\n\n` +
+                    `Thank you for your support 🙏\n\n` +
+                    `━━━━━━━━━━━━━━\n` +
+                    `🏢 *${(rBusinessName || '').includes('Ananth') ? 'ANANTH BUILDING MATERIALS & SUPPLIERS' : rBusinessName || 'BUSINESS NAME'}*`;
+
+                  const url = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
+                  
+                  captureRef(receivedReceiptRef, {
+                    format: 'png',
+                    quality: 0.9,
+                  }).then((uri) => {
+                    Share.shareSingle({
+                      title: 'Payment Receipt',
+                      message: '',
+                      url: uri,
+                      social: Share.Social.WHATSAPP as any,
+                      whatsAppNumber: phone,
+                    } as any).catch((err) => {
+                      Linking.openURL(url).catch(() => {
+                        Alert.alert('Error', 'Could not open WhatsApp.');
+                      });
+                    });
+                  }).catch(() => {
+                    Linking.openURL(url).catch(() => {
+                      Alert.alert('Error', 'Could not open WhatsApp.');
+                    });
+                  });
+                }}
+              >
+                <Text style={{ fontSize: 20 }}>📲</Text>
+                <Text style={{ color: Colors.white, fontWeight: 'bold', fontSize: 15 }}>Send WhatsApp Receipt</Text>
+              </TouchableOpacity>
+            </View>
+            )}
           </View>
         ) : activeTab === 'Categories' ? (
           <ScrollView style={styles.sectionContainer} showsVerticalScrollIndicator={false}>
@@ -2508,8 +3301,8 @@ const AdminDashboard = ({ navigation }: any) => {
               </View>
               
               <Text style={styles.inputLabel}>Role</Text>
-              <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
-                {['employee', 'customer', 'admin'].map(role => (
+              <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 15}}>
+                {['employee', 'customer', 'admin', 'staff'].map(role => (
                   <TouchableOpacity 
                     key={role} 
                     style={[styles.roleChip, accRole === role && styles.roleChipActive]}
@@ -2547,7 +3340,7 @@ const AdminDashboard = ({ navigation }: any) => {
               marginTop: 5,
             }}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center' }}>
-                {['All', 'Customer', 'Employee', 'Admin'].map((f) => {
+                {['All', 'Customer', 'Employee', 'Admin', 'Staff'].map((f) => {
                   const isActive = accountsFilter === f;
                   const iconColor = isActive ? '#FFFFFF' : '#4B5563';
                   const iconSize = 18;
@@ -2557,6 +3350,7 @@ const AdminDashboard = ({ navigation }: any) => {
                   else if (f === 'Customer') iconComponent = <ShoppingBag size={iconSize} color={iconColor} />;
                   else if (f === 'Employee') iconComponent = <ClipboardCheck size={iconSize} color={iconColor} />;
                   else if (f === 'Admin') iconComponent = <Eye size={iconSize} color={iconColor} />;
+                  else if (f === 'Staff') iconComponent = <Users size={iconSize} color={iconColor} />;
 
                   return (
                     <TouchableOpacity 
@@ -2624,6 +3418,8 @@ const AdminDashboard = ({ navigation }: any) => {
                                 await authService.apiDeleteCustomer(acc.id);
                               } else if (role === 'employee') {
                                 await authService.apiDeleteEmployee(acc.id);
+                              } else if (role === 'staff') {
+                                await authService.apiDeleteStaff(acc.id);
                               } else {
                                 await authService.apiDeleteUser(acc.id);
                               }
@@ -2774,20 +3570,20 @@ const AdminDashboard = ({ navigation }: any) => {
                        </TouchableOpacity>
                      </View>
                      <ScrollView>
-                       {categories.map((cat) => (
+                       {dynamicCategories.map((catObj) => (
                          <TouchableOpacity 
-                           key={cat}
+                           key={catObj.id || catObj.name}
                            style={styles.dropdownItem}
                            onPress={() => {
-                             setNewProduct({...newProduct, category: cat});
+                             setNewProduct({...newProduct, category: catObj.name});
                              setShowCategoryDropdown(false);
                            }}
                          >
                            <Text style={[
                              styles.dropdownItemText,
-                             newProduct.category === cat && styles.dropdownItemActive
-                           ]}>{cat}</Text>
-                           {newProduct.category === cat && <CheckCircle2 size={16} color={Colors.primary} />}
+                             newProduct.category === catObj.name && styles.dropdownItemActive
+                           ]}>{catObj.name}</Text>
+                           {newProduct.category === catObj.name && <CheckCircle2 size={16} color={Colors.primary} />}
                          </TouchableOpacity>
                        ))}
                      </ScrollView>
@@ -3226,7 +4022,32 @@ const AdminDashboard = ({ navigation }: any) => {
                           </View>
                           <Text style={{ fontWeight: 'bold', fontSize: 15, color: Colors.text }}>{r.truckNo}</Text>
                         </View>
-                        <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>{r.date}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          <Text style={{ color: Colors.textSecondary, fontSize: 12 }}>{r.date}</Text>
+                          <TouchableOpacity onPress={() => {
+                            setEditingFuel(r);
+                            setEditFuelTruck(r.truckNo);
+                            setEditFuelEmp(r.employeeName);
+                            setEditFuelLiters(r.liters.toString());
+                            setEditFuelRate(r.fuelPrice.toString());
+                            setEditFuelAmt(r.amount.toString());
+                            setEditFuelDate(r.date);
+                            setShowEditFuelModal(true);
+                          }}>
+                            <PenLine size={16} color={Colors.primary} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => {
+                            Alert.alert('Delete Fuel Record', 'Are you sure?', [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Delete', style: 'destructive', onPress: async () => {
+                                await fuelService.deleteFuelRecord(r.id);
+                                fetchFuel();
+                              }}
+                            ]);
+                          }}>
+                            <Trash2 size={16} color={Colors.error} />
+                          </TouchableOpacity>
+                        </View>
                       </View>
                       {/* Details grid */}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -3320,6 +4141,67 @@ const AdminDashboard = ({ navigation }: any) => {
                   <Text style={[styles.primaryActionText, { fontSize: 16 }]}>Save Payment</Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Edit Fuel Modal */}
+        <Modal visible={showEditFuelModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { height: '65%' }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Fuel Record</Text>
+                <TouchableOpacity onPress={() => setShowEditFuelModal(false)}>
+                  <X size={24} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={{ padding: 20 }}>
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>Truck Number</Text>
+                  <TextInput style={styles.adminInput} value={editFuelTruck} onChangeText={setEditFuelTruck} placeholderTextColor={Colors.textSecondary} />
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>Employee Name</Text>
+                  <TextInput style={styles.adminInput} value={editFuelEmp} onChangeText={setEditFuelEmp} placeholderTextColor={Colors.textSecondary} />
+                </View>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>Liters</Text>
+                    <TextInput style={styles.adminInput} value={editFuelLiters} onChangeText={setEditFuelLiters} keyboardType="numeric" placeholderTextColor={Colors.textSecondary} />
+                  </View>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>Rate/L</Text>
+                    <TextInput style={styles.adminInput} value={editFuelRate} onChangeText={setEditFuelRate} keyboardType="numeric" placeholderTextColor={Colors.textSecondary} />
+                  </View>
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>Total Amount (₹)</Text>
+                  <TextInput style={styles.adminInput} value={editFuelAmt} onChangeText={setEditFuelAmt} keyboardType="numeric" placeholderTextColor={Colors.textSecondary} />
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>Date (YYYY-MM-DD)</Text>
+                  <TextInput style={styles.adminInput} value={editFuelDate} onChangeText={setEditFuelDate} placeholderTextColor={Colors.textSecondary} />
+                </View>
+                
+                <TouchableOpacity style={[styles.primaryAction, { marginTop: 15, paddingVertical: 14, alignItems: 'center' }]} onPress={async () => {
+                  if (editingFuel) {
+                    await fuelService.updateFuelRecord(editingFuel.id, {
+                      truckNo: editFuelTruck,
+                      employeeName: editFuelEmp,
+                      liters: parseFloat(editFuelLiters) || 0,
+                      fuelPrice: parseFloat(editFuelRate) || 0,
+                      amount: parseFloat(editFuelAmt) || 0,
+                      date: editFuelDate,
+                    });
+                    fetchFuel();
+                    setShowEditFuelModal(false);
+                  }
+                }}>
+                  <Text style={[styles.primaryActionText, { fontSize: 16 }]}>Save Changes</Text>
+                </TouchableOpacity>
+                <View style={{ height: 40 }} />
+              </ScrollView>
             </View>
           </View>
         </Modal>

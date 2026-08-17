@@ -182,7 +182,7 @@ class CartService {
 
         qty: item.stock_quantity || 0,
 
-        image: item.product_image || '',
+        image: item.product_image ? (item.product_image.startsWith('/media/') ? `https://api.codingboss.in${item.product_image}` : item.product_image) : '',
 
         category: item.category_name || 'Others',
         categoryId: item.category || 1,
@@ -309,20 +309,35 @@ class CartService {
       }
 
       const result = await response.json();
-      this.bulkOrders = result.map((item: any) => ({
-        id: item.token_number || `MS-${String(item.id).padStart(3, '0')}`,
-        name: item.customer_name || 'Customer',
-        phone: item.customer_phone || item.phone || '',
-        brand: item.category_name || item.cement_brand || 'Cement',
-        bags: item.number_of_bags,
-        location: item.delivery_address,
-        deliveryDate: item.delivery_date || item.preferred_delivery_date,
-        paymentType: item.payment_type,
-        status: item.status ? (item.status.charAt(0).toUpperCase() + item.status.slice(1)) : 'Pending',
-        truckNo: item.truck_number,
-        date: new Date(item.created_at).toLocaleDateString(),
-        time: new Date(item.created_at).toLocaleTimeString(),
-      }));
+      this.bulkOrders = result.map((item: any) => {
+        let rawName = item.customer_name || 'Customer';
+        let actualName = rawName;
+        let actualBrand = item.cement_brand || item.category_name;
+        
+        if (rawName.includes('||')) {
+          const parts = rawName.split('||');
+          actualName = parts[0];
+          if (parts[1]) actualBrand = parts[1];
+        } else if (!actualBrand && item.category) {
+          const foundCat = this.categories.find((c: any) => String(c.id) === String(item.category));
+          if (foundCat) actualBrand = foundCat.name;
+        }
+
+        return {
+          id: item.token_number || `MS-${String(item.id).padStart(3, '0')}`,
+          name: actualName,
+          phone: item.customer_phone || item.phone || '',
+          brand: actualBrand || 'Cement',
+          bags: item.number_of_bags,
+          location: item.delivery_address,
+          deliveryDate: item.delivery_date || item.preferred_delivery_date,
+          paymentType: item.payment_type,
+          status: item.status ? (item.status.charAt(0).toUpperCase() + item.status.slice(1)) : 'Pending',
+          truckNo: item.truck_number,
+          date: new Date(item.created_at).toLocaleDateString(),
+          time: new Date(item.created_at).toLocaleTimeString(),
+        };
+      });
       this.notify();
       return this.bulkOrders;
     } catch (e) {
@@ -347,20 +362,35 @@ class CartService {
 
       const result = await response.json();
       // Map API fields to UI fields
-      const mappedTokens = result.map((item: any) => ({
-        id: item.token_number || `MS-${String(item.id).padStart(3, '0')}`,
-        name: item.customer_name || 'Customer',
-        phone: item.customer_phone || item.phone || '',
-        brand: item.category_name || item.cement_brand || 'Cement',
-        bags: item.number_of_bags || 0,
-        location: item.delivery_address || 'N/A',
-        deliveryDate: item.preferred_delivery_date || 'N/A',
-        paymentType: item.payment_type || 'N/A',
-        status: item.status ? (item.status.charAt(0).toUpperCase() + item.status.slice(1)) : 'Pending',
-        truckNo: item.truck_number || 'Assigning...',
-        date: item.created_at ? new Date(item.created_at).toLocaleDateString() : new Date().toLocaleDateString(),
-        time: item.created_at ? new Date(item.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
-      }));
+      const mappedTokens = result.map((item: any) => {
+        let rawName = item.customer_name || 'Customer';
+        let actualName = rawName;
+        let actualBrand = item.cement_brand || item.category_name;
+        
+        if (rawName.includes('||')) {
+          const parts = rawName.split('||');
+          actualName = parts[0];
+          if (parts[1]) actualBrand = parts[1];
+        } else if (!actualBrand && item.category) {
+          const foundCat = this.categories.find((c: any) => String(c.id) === String(item.category));
+          if (foundCat) actualBrand = foundCat.name;
+        }
+
+        return {
+          id: item.token_number || `MS-${String(item.id).padStart(3, '0')}`,
+          name: actualName,
+          phone: item.customer_phone || item.phone || '',
+          brand: actualBrand || 'Cement',
+          bags: item.number_of_bags || 0,
+          location: item.delivery_address || 'N/A',
+          deliveryDate: item.preferred_delivery_date || 'N/A',
+          paymentType: item.payment_type || 'N/A',
+          status: item.status ? (item.status.charAt(0).toUpperCase() + item.status.slice(1)) : 'Pending',
+          truckNo: item.truck_number || 'Assigning...',
+          date: item.created_at ? new Date(item.created_at).toLocaleDateString() : new Date().toLocaleDateString(),
+          time: item.created_at ? new Date(item.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+        };
+      });
 
       this.bulkOrders = mappedTokens;
       this.notify();
@@ -382,7 +412,9 @@ class CartService {
 
       const payload = {
         category: orderData.categoryId || 1,
-        customer_name: orderData.customerName || 'Customer',
+        category_name: orderData.categoryName || 'Cement',
+        cement_brand: orderData.brandName || orderData.categoryName || 'Cement',
+        customer_name: orderData.brandName ? `${orderData.customerName || 'Customer'}||${orderData.brandName}` : (orderData.customerName || 'Customer'),
         customer_phone: orderData.phone || '',
         number_of_bags: orderData.bags || 50,
         delivery_address: orderData.location || 'Coimbatore',
@@ -649,6 +681,9 @@ class CartService {
 
       // 2. Fetch Products
       await this.apiFetchProducts();
+      
+      // Fetch Categories to ensure Brand mappings work
+      await this.apiFetchCategories();
 
       // 2.5 Fetch Cart for logged in employee
       await this.apiFetchCart();
@@ -683,14 +718,7 @@ class CartService {
         throw new Error('Please login again');
       }
 
-      const employeeId = Number(user.id);
-
-      if (isNaN(employeeId)) {
-        throw new Error('Invalid employee ID');
-      }
-
       const payload = {
-        employee: employeeId,
         customer_name: orderData.name,
         customer_phone: orderData.phone,
         delivery_address: orderData.address || 'Chennai',
@@ -698,7 +726,8 @@ class CartService {
         items: orderData.items.map((item: any) => {
           // Try to find a real backend ID by name if the current ID is static (non-numeric)
           // Also handle IDs with suffixes like "1-8" -> 1
-          const baseIdStr = String(item.id || '').split('-')[0];
+          const actualId = item.originalId || item.id;
+          const baseIdStr = String(actualId || '').split('-')[0];
           let realId = !isNaN(parseInt(baseIdStr)) ? parseInt(baseIdStr) : null;
 
           if (!realId) {
@@ -710,6 +739,9 @@ class CartService {
             product: realId,
             product_name: item.name,
             quantity: item.qty,
+            size: item.size || item.size_mm ? `${item.size || item.size_mm}mm` : '',
+            weight: item.weight || 0,
+            tmt_brand: item.brand || item.tmt_brand || '',
             fixed_unit_price: item.price || 0
           };
         })
@@ -733,20 +765,20 @@ class CartService {
       const result = await response.json();
 
       if (orderData.items && orderData.items.length > 0) {
+        // Remove the checked-out items from the cart
         const checkedOutIds = orderData.items.map((i: any) => i.id);
         this.cartItems = this.cartItems.filter(item => !checkedOutIds.includes(item.id));
         
-        // Also remove from customParties if they no longer have any items left in cart
-        const remainingForParty = this.cartItems.some(i => i.partyName === orderData.name && i.partyPhone === orderData.phone);
-        if (!remainingForParty) {
-          this.customParties = this.customParties.filter(
-            p => !(p.name === orderData.name && p.phone === orderData.phone)
-          );
-        }
+        // NOTE: We no longer remove the party profile (customParties) from the cart.
+        // The user wants to keep the empty party profile visible in the cart after checkout.
         
         this.notify();
       } else {
-        this.clearCartForParty(orderData.name, orderData.phone);
+        // If they did a full clear
+        this.cartItems = this.cartItems.filter(
+          item => !(item.partyName === orderData.name && item.partyPhone === orderData.phone)
+        );
+        this.notify();
       }
       return result;
     } catch (e) {
@@ -876,7 +908,10 @@ class CartService {
             name: resolvedName || `Product #${i.product || i.id}`,
             qty: i.quantity || 1,
             price: i.price || i.fixed_unit_price || 0,
-            category: i.category === 1 ? 'Cement' : 'Other'
+            category: i.category === 1 ? 'Cement' : 'Other',
+            size: i.size || '',
+            weight: i.weight || 0,
+            brand: i.tmt_brand || i.brand_name || ''
           };
         })
       }));

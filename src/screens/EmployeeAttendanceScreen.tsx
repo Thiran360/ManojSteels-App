@@ -163,7 +163,7 @@ const EmployeeAttendanceScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.modernHeader, { backgroundColor: Colors.primary, paddingTop: Math.max(insets.top, 20) }]}>
+      <View style={[styles.modernHeader, { backgroundColor: Colors.primary, paddingTop: insets.top + 20 }]}>
         <Text style={styles.modernHeaderTitle}>Daily Attendance Roster</Text>
         <Text style={styles.modernHeaderSubtitle}>Manage your staff attendance efficiently</Text>
       </View>

@@ -24,7 +24,7 @@ const BuildingBlocksScreen = ({ navigation }: any) => {
   useEffect(() => {
     const update = () => {
       setCartCount(cartService.getCartItems().length);
-      setDynamicProducts(cartService.getProducts());
+      setDynamicProducts([...cartService.getProducts()]);
     };
     cartService.on('change', update);
     return () => cartService.off('change', update);

@@ -32,7 +32,7 @@ const TMTBarsScreen = ({ navigation }: any) => {
   useEffect(() => {
     const update = () => {
       setCartCount(cartService.getCartItems().length);
-      setDynamicProducts(cartService.getProducts());
+      setDynamicProducts([...cartService.getProducts()]);
     };
     cartService.on('change', update);
     return () => cartService.off('change', update);
@@ -179,7 +179,8 @@ const TMTBarsScreen = ({ navigation }: any) => {
                     ...item, 
                     id: `${item.id}-${size}`, 
                     name: `${item.name} (${size}MM - ${weight}kg)`,
-                    weight: weight
+                    weight: weight,
+                    size: size
                   };
                   return { item: itemWithSize, qty: qty };
                 }).filter(Boolean);

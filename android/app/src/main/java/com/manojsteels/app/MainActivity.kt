@@ -1,4 +1,4 @@
-package com.cart_app
+package com.manojsteels.app
 
 import android.os.Bundle
 import com.facebook.react.ReactActivity

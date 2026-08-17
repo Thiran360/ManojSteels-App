@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Home, ShoppingCart, User, Coins, FileText, Fuel } from 'lucide-react-native';
+import { Home, ShoppingCart, User, Coins, FileText, Fuel, Receipt } from 'lucide-react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import HomeScreen from '../screens/HomeScreen';
 import CartScreen from '../screens/CartScreen';
@@ -9,6 +9,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import TokensScreen from '../screens/TokensScreen';
 import EmployeeAttendanceScreen from '../screens/EmployeeAttendanceScreen';
 import FuelScreen from '../screens/FuelScreen';
+import AdminDashboard from '../screens/AdminDashboard';
 import { Colors } from '../theme/colors';
 import { authService } from '../services/AuthService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,7 +47,8 @@ const TabIcon = ({ focused, IconComponent, label }: any) => {
 
 const MainTabNavigator = () => {
   const user = authService.getCurrentUser();
-  const isEmployee = user?.role === 'employee' || user?.role?.toLowerCase() === 'employee';
+  const isEmployee = user?.role === 'employee' || user?.role?.toLowerCase() === 'employee' || user?.role?.toLowerCase() === 'staff';
+  const isSudhakar = (user?.mobile_number === '7904343214' || user?.full_name?.toUpperCase() === 'SUDHAKAR');
   const insets = useSafeAreaInsets();
 
   return (
@@ -114,6 +116,17 @@ const MainTabNavigator = () => {
           options={{
             tabBarIcon: ({ focused }) => (
               <TabIcon focused={focused} IconComponent={Fuel} label="Fuel" />
+            ),
+          }}
+        />
+      )}
+      {isEmployee && (
+        <Tab.Screen
+          name="Receipts"
+          component={AdminDashboard}
+          options={{
+            tabBarIcon: ({ focused }) => (
+              <TabIcon focused={focused} IconComponent={Receipt} label="Voucher" />
             ),
           }}
         />

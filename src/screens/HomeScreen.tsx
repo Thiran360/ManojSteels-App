@@ -125,7 +125,7 @@ const HomeScreen = ({ navigation }: any) => {
     fetchRealProducts();
 
     const update = () => {
-      setDynamicProducts(cartService.getProducts());
+      setDynamicProducts([...cartService.getProducts()]);
       setCartCount(cartService.getCartItems().length);
       setCategories(cartService.getCategories());
     };

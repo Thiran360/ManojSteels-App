@@ -126,6 +126,9 @@ const CartScreenView = ({ navigation }: any) => {
   const [cashCustomerModalVisible, setCashCustomerModalVisible] = useState(false);
   const [cashCustomerName, setCashCustomerName] = useState('');
   const [cashCustomerPhone, setCashCustomerPhone] = useState('');
+  
+  const [brandList, setBrandList] = useState<any[]>([]);
+  const [selectedBrand, setSelectedBrand] = useState('All');
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -147,6 +150,17 @@ const CartScreenView = ({ navigation }: any) => {
         await cartService.apiFetchWalkinCustomers();
       } catch (error) {
         console.log('Error fetching endpoints:', error);
+      }
+      try {
+        const res = await fetch('https://api.codingboss.in/inventory/brands/', {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setBrandList([{ id: 'all', name: 'All' }, ...data]);
+        }
+      } catch (err) {
+        console.log('Error fetching brands', err);
       }
     };
     fetchCartEndpoint();
@@ -520,7 +534,9 @@ const CartScreenView = ({ navigation }: any) => {
         ...product,
         id: `${product.id}-${size}`,
         name: `${product.name} (${size}MM)${weightStr}`,
-        category: 'TMT Bars'
+        category: 'TMT Bars',
+        size: size,
+        weight: selection.weight
       };
       await cartService.addItemForParty(
         itemWithSize,
@@ -842,11 +858,12 @@ const CartScreenView = ({ navigation }: any) => {
   const filteredModalProducts = allProducts.filter(
     (p) => {
       const matchesSearch =
-        p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-        p.brand.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-        p.category.toLowerCase().includes(productSearchQuery.toLowerCase());
+        (p.name || '').toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+        (p.brand || '').toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+        (p.category || '').toLowerCase().includes(productSearchQuery.toLowerCase());
       const matchesCat = matchesCategory(p.category, selectedCategory);
-      return matchesSearch && matchesCat;
+      const matchesBrand = selectedBrand === 'All' || p.brand === selectedBrand;
+      return matchesSearch && matchesCat && matchesBrand;
     }
   );
 
@@ -1388,6 +1405,54 @@ const CartScreenView = ({ navigation }: any) => {
                   })}
                 </ScrollView>
               </View>
+              
+              {/* Brand Filter Tabs */}
+              {brandList.length > 1 && (
+                <View style={{ 
+                  backgroundColor: '#FFFFFF', 
+                  borderRadius: 40, 
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                  shadowColor: '#000', 
+                  shadowOffset: { width: 0, height: 4 }, 
+                  shadowOpacity: 0.06, 
+                  shadowRadius: 8, 
+                  elevation: 4,
+                  width: '100%',
+                  marginTop: 8
+                }}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 16, paddingHorizontal: 6, alignItems: 'center' }}>
+                    {brandList.map((brand: any) => {
+                      const isActive = selectedBrand === brand.name;
+                      return (
+                        <TouchableOpacity 
+                          key={brand.id || brand.name} 
+                          onPress={() => setSelectedBrand(brand.name)}
+                          style={{ 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            backgroundColor: isActive ? 'rgba(33, 150, 243, 0.1)' : 'transparent',
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 20,
+                            borderWidth: isActive ? 1 : 0,
+                            borderColor: '#2196F3'
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{ 
+                            fontSize: 12, 
+                            fontWeight: isActive ? '700' : '500', 
+                            color: isActive ? '#2196F3' : '#4F5E7B' 
+                          }}>
+                            {brand.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
             </View>
           </View>
 

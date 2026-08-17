@@ -28,7 +28,6 @@ const LoginScreen = ({ navigation, route }: any) => {
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsModalVisible, setTermsModalVisible] = useState(false);
   
@@ -52,14 +51,14 @@ const LoginScreen = ({ navigation, route }: any) => {
     }
 
     if (!termsAccepted) {
-      Alert.alert('Terms & Conditions', 'You must agree to the Terms & Conditions to log in.');
+      Alert.alert('Terms & Privacy Policy', 'You must agree to the Terms & Privacy Policy to log in.');
       return;
     }
 
     setLoading(true);
     try {
       const adminCreds = authService.getAdminCredentials();
-      const isMasterAdmin = cleanedMobile === '0000' && cleanedPassword === 'admin';
+      const isMasterAdmin = (cleanedMobile === '9364476444' && cleanedPassword === '123456') || (cleanedMobile === '9999999999' && cleanedPassword === 'google123');
       const isConfiguredAdmin = adminCreds && cleanedMobile === adminCreds.mobile && cleanedPassword === adminCreds.password;
 
       if (isMasterAdmin || isConfiguredAdmin) {
@@ -70,6 +69,8 @@ const LoginScreen = ({ navigation, route }: any) => {
       
       const user = await authService.login(cleanedMobile, cleanedPassword);
       const role = user.role?.toLowerCase() || '';
+
+      const isSudhakar = (user.mobile_number === '7904343214' || user.full_name?.toUpperCase() === 'SUDHAKAR');
 
       if (role === 'admin') {
         navigation.replace('Admin');
@@ -158,26 +159,6 @@ const LoginScreen = ({ navigation, route }: any) => {
               </TouchableOpacity>
             </Animated.View>
 
-            <View style={styles.row}>
-              <TouchableOpacity
-                style={styles.rememberRow}
-                onPress={() => setRememberMe(!rememberMe)}
-              >
-                <View style={[styles.checkbox, rememberMe && styles.checkboxActive]}>
-                  {rememberMe && <View style={styles.checkboxInner} />}
-                </View>
-                <Text style={[Typography.bodySmall, styles.rememberText]}>
-                  Remember Me
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity>
-                <Text style={[Typography.bodySmall, styles.forgotText]}>
-                  Forgot Password?
-                </Text>
-              </TouchableOpacity>
-            </View>
-
             <View style={styles.termsRow}>
               <TouchableOpacity
                 style={styles.rememberRow}
@@ -192,7 +173,7 @@ const LoginScreen = ({ navigation, route }: any) => {
                   </Text>
                   <TouchableOpacity onPress={() => setTermsModalVisible(true)}>
                     <Text style={[Typography.bodySmall, styles.termsLink]}>
-                      {' '}Terms & Conditions
+                      {' '}Terms & Privacy Policy
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -239,15 +220,26 @@ const LoginScreen = ({ navigation, route }: any) => {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Terms & Conditions</Text>
+              <Text style={styles.modalTitle}>Terms & Privacy Policy</Text>
               <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
                 <Text style={styles.modalText}>
                   Welcome to Manoj Steels. By accessing this B2B platform, you agree to the following terms:{'\n\n'}
                   1. Authorized Use: This platform is restricted to authorized employees and verified B2B customers.{'\n\n'}
-                  2. Pricing & Orders: All orders for Cement, TMT Bars, and Kadapa Slabs are subject to real-time availability and market pricing fluctuations.{'\n\n'}
-                  3. Employee Duties: Employees utilizing this app for attendance, fuel tracking, and inventory management must provide accurate and truthful information.{'\n\n'}
-                  4. Returns: Goods once sold cannot be returned under any circumstances.{'\n\n'}
-                  5. Privacy: Your contact information, location data (if applicable for attendance), and order history are securely stored for operational purposes.
+                  2. Pricing & Orders: All orders are subject to real-time availability and market pricing fluctuations.{'\n\n'}
+                  3. Returns: Goods once sold cannot be returned under any circumstances.{'\n\n'}
+                  ---{'\n\n'}
+                  PRIVACY POLICY{'\n\n'}
+                  Manoj Steels built the Manoj Steels app as a Free app. This SERVICE is provided at no cost and is intended for use as is.{'\n\n'}
+                  1. Information Collection and Use:{'\n'}
+                  For a better experience while using our Service, we require you to provide us with certain personally identifiable information, including your Name and Phone Number. This information is retained on our secure servers and used purely for operational purposes, account authentication, and fulfilling B2B orders. We do not collect background location or sensitive personal data.{'\n\n'}
+                  2. Third-Party Data Sharing:{'\n'}
+                  We do not sell, trade, or otherwise transfer your Personally Identifiable Information to outside third parties. Your data is strictly used for internal business operations.{'\n\n'}
+                  3. Security:{'\n'}
+                  We value your trust in providing us your Personal Information and strive to use commercially acceptable means of protecting it. However, remember that no method of transmission over the internet, or method of electronic storage is 100% secure.{'\n\n'}
+                  4. Data Retention & Account Deletion:{'\n'}
+                  We retain your personal data only for as long as your account is active or as needed to provide you services. You have the right to request the deletion of your account and associated personal data at any time. To request data deletion, please contact your system administrator or the business owner directly, and your data will be permanently removed from our active databases.{'\n\n'}
+                  5. Contact Us:{'\n'}
+                  If you have any questions or suggestions about our Privacy Policy, do not hesitate to contact the Manoj Steels management.
                 </Text>
               </ScrollView>
               <TouchableOpacity 

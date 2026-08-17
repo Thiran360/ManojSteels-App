@@ -444,6 +444,41 @@ class AuthService {
     }
   }
 
+  async apiDeleteStaff(id: string) {
+    try {
+      // Trying with path parameter as standard, or using the specific URL from user
+      const response = await fetch(`https://api.codingboss.in/inventory/delete-staff/${id}/`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+
+      if (!response.ok) {
+        // Fallback to body ID just in case
+        const fallbackResponse = await fetch('https://api.codingboss.in/inventory/delete-staff/', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+          body: JSON.stringify({ id: parseInt(id) })
+        });
+        if (!fallbackResponse.ok) {
+          throw new Error('Failed to delete staff');
+        }
+      }
+
+      return true;
+    } catch (e) {
+      console.log('Delete Staff Error:', e);
+      throw e;
+    }
+  }
+
   async login(phone: string, password: string) {
     try {
       const payload = {

@@ -223,7 +223,51 @@ class FuelService {
   }
 
   async deleteFuelRecord(id: string): Promise<void> {
+    try {
+      await fetch(`https://api.codingboss.in/inventory/fuel-detail/`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({ id: Number(id) })
+      });
+    } catch (e) {
+      console.warn('Backend fuel record delete error:', e);
+    }
     this.records = this.records.filter(r => r.id !== id);
+    await this.saveData();
+  }
+
+  async updateFuelRecord(id: string, updatedData: Partial<FuelRecord>): Promise<void> {
+    try {
+      const payload = {
+        id: Number(id),
+        truck_no: updatedData.truckNo,
+        employee_name: updatedData.employeeName,
+        fuel_price: updatedData.fuelPrice,
+        amount: updatedData.amount,
+        liters: updatedData.liters,
+        date: updatedData.date
+      };
+      const response = await fetch(`https://api.codingboss.in/inventory/fuel-detail/`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        console.warn('Backend fuel record update error:', await response.text());
+      }
+    } catch (e) {
+      console.warn('Backend fuel record update error:', e);
+    }
+
+    this.records = this.records.map(r => r.id === id ? { ...r, ...updatedData } : r);
     await this.saveData();
   }
 

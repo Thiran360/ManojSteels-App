@@ -81,6 +81,7 @@ const TokensScreen = ({ navigation }: any) => {
   const [selectedCategory, setSelectedCategory] = useState<any>(null);
   const [brands, setBrands] = useState<string[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>('Cement');
+  const [brandName, setBrandName] = useState(''); // NEW FIELD for literal brand name
   const [bags, setBags] = useState('');
   const [location, setLocation] = useState('');
   const [deliveryDate, setDeliveryDate] = useState(new Date());
@@ -181,27 +182,28 @@ const TokensScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     const update = () => {
-      const currentBrands = cartService.getBrands();
-      setBrands([...currentBrands]);
-      if (!currentBrands.includes(selectedBrand) && currentBrands.length > 0) {
-        setSelectedBrand(currentBrands[0]);
-      }
+      setBulkOrderList([...cartService.getBulkOrders()]);
     };
     cartService.on('change', update);
-    
-    // Initial fetch from API
-    const initialBrands = cartService.getBrands();
-    setBrands([...initialBrands]);
-    if (initialBrands.length > 0 && selectedBrand === 'Cement') {
-      setSelectedBrand(initialBrands[0]);
-    }
 
-    cartService.apiFetchActiveTokens();
+    // Fetch categories first to ensure brand mappings work, then fetch active tokens
     cartService.apiFetchCategories().then((cats: any[]) => {
-      const cementCats = cats.filter(c => c.name.toLowerCase().includes('cement'));
-      setCategories(cementCats);
-      if (cementCats.length > 0) setSelectedCategory(cementCats[0]);
-    }).catch(e => console.error(e));
+      setCategories(cats);
+      const catNames = cats.map(c => c.name);
+      if (catNames.length > 0) {
+        setBrands(catNames);
+        if (selectedBrand === 'Cement' || !catNames.includes(selectedBrand)) {
+          setSelectedBrand(catNames[0]);
+          setSelectedCategory(cats[0]);
+        }
+      }
+      // Fetch active tokens after categories are populated
+      cartService.apiFetchActiveTokens();
+    }).catch(e => {
+      console.error(e);
+      // Fallback
+      cartService.apiFetchActiveTokens();
+    });
     
     return () => cartService.off('change', update);
   }, []);
@@ -222,6 +224,7 @@ const TokensScreen = ({ navigation }: any) => {
       const orderData = {
         categoryId: selectedCategory?.id || 1,
         categoryName: selectedBrand || selectedCategory?.name || 'Cement',
+        brandName: brandName, // Passes the explicit brand name typed by user
         bags: parseInt(bags),
         location: location,
         deliveryDate: `${deliveryDate.getFullYear()}-${String(deliveryDate.getMonth() + 1).padStart(2, '0')}-${String(deliveryDate.getDate()).padStart(2, '0')}`,
@@ -538,15 +541,19 @@ const TokensScreen = ({ navigation }: any) => {
               </View>
             )}
             
-            <View>
-              <Text style={styles.inputLabel}>Brand</Text>
+            <View style={{ marginBottom: 16 }}>
+              <Text style={styles.inputLabel}>Category</Text>
               <View style={styles.brandPicker}>
                 {brands.length > 0 ? (
                   brands.map((brand: string) => (
                     <TouchableOpacity 
                       key={brand}
                       style={[styles.brandOption, selectedBrand === brand && styles.selectedBrand]}
-                      onPress={() => setSelectedBrand(brand)}
+                      onPress={() => {
+                        setSelectedBrand(brand);
+                        const matchedCat = categories.find(c => c.name === brand);
+                        if (matchedCat) setSelectedCategory(matchedCat);
+                      }}
                     >
                       <Text style={[styles.brandOptionText, selectedBrand === brand && styles.selectedBrandText]}>
                         {brand}
@@ -560,6 +567,20 @@ const TokensScreen = ({ navigation }: any) => {
                     </Text>
                   </View>
                 )}
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Brand Name</Text>
+              <View style={styles.inputWrapper}>
+                <Ticket size={20} color={Colors.primary} style={styles.inputIcon} />
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Enter brand (e.g. UltraTech, Ramco)" 
+                  placeholderTextColor={Colors.textSecondary}
+                  value={brandName}
+                  onChangeText={setBrandName}
+                />
               </View>
             </View>
 
