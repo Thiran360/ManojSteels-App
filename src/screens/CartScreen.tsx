@@ -157,7 +157,7 @@ const CartScreenView = ({ navigation }: any) => {
         });
         if (res.ok) {
           const data = await res.json();
-          setBrandList([{ id: 'all', name: 'All' }, ...data]);
+           setBrandList([{ id: 'all', name: 'All' }, ...data]);
         }
       } catch (err) {
         console.log('Error fetching brands', err);
